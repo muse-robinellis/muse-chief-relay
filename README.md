@@ -30,7 +30,7 @@ Wire format: [docs/protocol.md](docs/protocol.md).
 
 ## Quick start — Chief (desktop)
 
-Requires [.NET 8 SDK](https://dotnet.microsoft.com/download).
+Requires [.NET 8 SDK](https://dotnet.microsoft.com/download). Chief.Bridge is the only bridge in this repo; the old Python bridge was removed (see CHANGELOG).
 
 ```bash
 cp config.example.json config.json
@@ -78,8 +78,6 @@ Runtime files (`inbox.jsonl`, `outbox.jsonl`, `unread.jsonl`, `state.json`) live
 
 Unit tests: `dotnet test MuseChiefRelay.sln` (xunit, `tests/Chief.Bridge.Tests`).
 
-Operator helper (optional): `python3 relay_poll.py` reads new inbound chats from `inbox.jsonl` with an offset file so long-running loops skip own echoes.
-
 ## Configuration (`config.json`)
 
 Copy `config.example.json` to `config.json`. `config.json` is gitignored. Keep it that way, because it can hold your pass.
@@ -90,7 +88,7 @@ Copy `config.example.json` to `config.json`. `config.json` is gitignored. Keep i
 | `origin` | bridge | Origin header sent on connect (`https://hack.chat`) |
 | `channel` | bridge | Channel to join. Anyone who knows the name can read it. |
 | `nick` | bridge | Nick for the bridge, e.g. `chief` |
-| `pass` | bridge (.NET and legacy Python) | Optional hack.chat password. It gives the nick a **tripcode**. It is sent only in the join frame and is never written to logs. |
+| `pass` | bridge | Optional hack.chat password. It gives the nick a **tripcode**. It is sent only in the join frame and is never written to logs. |
 | `base` | bridge | Directory for runtime files. Default: the config file's directory. |
 | `publish_repos` | `tools/status.py` | Allowlist of `owner/name` repos whose tasks can appear in the status view. Default: this repo. Compared case-insensitively. |
 | `publish_trips` | `tools/status.py` | Tripcodes allowed to publish. Every task, ack and result must carry one, **including the bridge's own**. An empty or missing list publishes nothing. |
@@ -151,7 +149,7 @@ Examples (send as the **entire** chat message text):
 
 | Path | Role |
 |------|------|
-| `src/Chief.Bridge/` | Primary desktop WSS bridge (.NET 8) |
+| `src/Chief.Bridge/` | The desktop WSS bridge (.NET 8); the only bridge in this repo |
 | `tests/Chief.Bridge.Tests/` | xunit tests for the bridge's outbox reader, frame handling, config and CLI |
 | `web/muse/` | Primary Muse browser client |
 | `docs/protocol.md` | Wire protocol |
@@ -162,19 +160,6 @@ Examples (send as the **entire** chat message text):
 | `tools/status.py` | Fail-closed status generator (+ `test_status.py`) |
 | `config.example.json` | Config template (see Configuration) |
 | `CHANGELOG.md` | What changed, by PR |
-| `relay_poll.py` | Offset-based inbound poller for operator loops |
-| `legacy/python/` | Legacy Python prototype (`bridge.py`, `bin/hc`, …) |
-
-## Legacy Python
-
-The original Python bridge lives under `legacy/python/` for reference. **Chief.Bridge is the primary bridge.** Prefer it and `web/muse` for new work. This deployment's `chief` moved from the Python bridge to Chief.Bridge on 2026-09-26. It is still on a build from before the Unreleased fixes, and gets them only when they're merged and redeployed.
-
-```bash
-cd legacy/python
-python3 -m pip install -r requirements.txt
-cp ../../config.example.json config.json
-./bin/hc join
-```
 
 ## Safety
 
