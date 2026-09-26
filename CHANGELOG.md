@@ -4,7 +4,7 @@ Merged work, newest first. Times are ET.
 
 ## Unreleased
 
-- **Removed: legacy Python bridge** (stacked on #7). Deleted `legacy/python/`, which held `bridge.py`,
+- **#8 Removed: legacy Python bridge** (open, stacked on #7). Deleted `legacy/python/`, which held `bridge.py`,
   `bin/hc`, `parse_msg.py`, `test_pump.py`, `requirements.txt` and its README. Also deleted the root
   `relay_poll.py`, the operator poller for the old Python setup (it hard-coded `/workspace/hackchat`).
   Removed the matching `.gitignore` entries and all doc and landing-page references. Chief.Bridge is the
