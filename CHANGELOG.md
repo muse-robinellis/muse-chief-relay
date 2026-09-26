@@ -4,7 +4,7 @@ Merged work, newest first. Times are ET.
 
 ## Unreleased
 
-- **Chief.Bridge reliability fixes** (branch `fix-csharp-bridge-reliability`, not merged yet).
+- **#7 Chief.Bridge reliability fixes** (open, not merged).
   - Reconnect delay: it now goes back to 1 s after a session confirmed by `onlineSet` or 60 s of uptime. Before, the reset line was unreachable, so after a few drops every reconnect waited 30 s for the rest of the process's life.
   - Clean shutdown on SIGTERM and SIGINT. `state.json` ends with `alive: false` and `[chief] stopped` is logged. Before, the process exited from the ProcessExit handler and left `state.json` saying `alive: true`.
   - Outbox: only complete, newline-terminated lines are sent, and the read position advances line by line only after a send succeeds. A line that fails to send is sent again after the reconnect. Before, the position moved before the send, so a line was lost if the send failed, and a half-written line could go out truncated.
