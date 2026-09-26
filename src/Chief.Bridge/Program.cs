@@ -1,7 +1,7 @@
-using System.Net.WebSockets;
-using System.Text;
+using System.Diagnostics;
+using System.Runtime.InteropServices;
+using System.Text.Encodings.Web;
 using System.Text.Json;
-using System.Text.Json.Nodes;
 
 namespace Chief.Bridge;
 
@@ -10,7 +10,10 @@ internal static class JsonUtil
     public static readonly JsonSerializerOptions Opts = new()
     {
         PropertyNameCaseInsensitive = true,
-        WriteIndented = false
+        WriteIndented = false,
+        // Keep ' and non-ASCII text readable in the .jsonl files and on the wire. The output is still
+        // valid JSON; it is never embedded in HTML or a <script> block.
+        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
     };
 }
 
@@ -18,31 +21,66 @@ internal static class Program
 {
     public static async Task<int> Main(string[] args)
     {
-        if (args.Length > 0 && args[0] is "say" or "status" or "help" or "-h" or "--help")
+        try
         {
-            return args[0] switch
+            var cli = CliArgs.Parse(args);
+            return cli.Command switch
             {
-                "say" => await CmdSayAsync(args),
-                "status" => CmdStatus(),
-                _ => CmdHelp()
+                "say" => await CmdSayAsync(cli),
+                "status" => CmdStatus(cli),
+                "help" => CmdHelp(),
+                _ => await RunAsync(cli)
             };
         }
-
-        // Optional config path as first arg (not a subcommand)
-        string? configArg = args.Length > 0 ? args[0] : null;
-        var cfg = RelayConfig.Load(configArg);
-        var bridge = new HackChatBridge(cfg);
-        using var cts = new CancellationTokenSource();
-        Console.CancelKeyPress += (_, e) =>
+        catch (Exception ex) when (ex is ConfigException or ArgumentException)
         {
-            e.Cancel = true;
-            cts.Cancel();
-        };
+            Console.Error.WriteLine($"[chief] {ex.Message}");
+            return 2;
+        }
+    }
 
-        Console.WriteLine($"[chief] channel={cfg.Channel} nick={cfg.Nick} base={cfg.BaseDir}");
-        AppDomain.CurrentDomain.ProcessExit += (_, _) => cts.Cancel();
-        await bridge.RunForeverAsync(cts.Token);
-        return 0;
+    private static async Task<int> RunAsync(CliArgs cli)
+    {
+        var cfg = RelayConfig.Load(cli.ConfigPath, allowExampleFallback: true);
+        using var cts = new CancellationTokenSource();
+
+        // SIGTERM / SIGINT: cancel and let RunForeverAsync finish, so the final state.json write
+        // (alive=false) and the "stopped" line happen. A second signal is not intercepted, so the
+        // runtime's default handling terminates the process if shutdown ever hangs.
+        var signals = 0;
+        var registrations = new List<PosixSignalRegistration>();
+        foreach (var sig in new[] { PosixSignal.SIGTERM, PosixSignal.SIGINT })
+        {
+            try
+            {
+                registrations.Add(PosixSignalRegistration.Create(sig, ctx =>
+                {
+                    if (Interlocked.Increment(ref signals) > 1)
+                        return;
+                    ctx.Cancel = true;
+                    Console.WriteLine($"[chief] {ctx.Signal} received, shutting down…");
+                    cts.Cancel();
+                }));
+            }
+            catch (PlatformNotSupportedException)
+            {
+                // Not every signal exists on every OS; the others still work.
+            }
+        }
+
+        try
+        {
+            Console.WriteLine(
+                $"[chief] config={cfg.ConfigPath} ({cfg.Source}) channel={cfg.Channel} nick={cfg.Nick} base={cfg.BaseDir}");
+            var bridge = new HackChatBridge(cfg);
+            await bridge.RunForeverAsync(cts.Token);
+            return 0;
+        }
+        finally
+        {
+            foreach (var r in registrations)
+                r.Dispose();
+        }
     }
 
     private static int CmdHelp()
@@ -51,45 +89,51 @@ internal static class Program
             """
             Chief.Bridge — Muse↔Chief hack.chat WSS relay (desktop)
 
-              (default)           Run the bridge forever
-              say <text>          Append one chat line to outbox and exit
-              status              Print channel/nick/alive from state.json
-              <config-path>       Optional config.json path as first arg
+              [--config <path> | <path>]        Run the bridge until SIGTERM / Ctrl+C
+              say [--config <path>] <text>      Append one chat line to {base}/outbox.jsonl and exit
+              status [--config <path>]          Print channel/nick and the bridge state from state.json
+              help                              This text
 
-            Config: MUSE_RELAY_CONFIG env, or config.json next to the app /
-            cwd, or config.example.json. Schema: url, origin, channel, nick, base.
+            Config for the bridge run: --config or the first argument, then MUSE_RELAY_CONFIG, then
+            ./config.json, then ./config.example.json (with a warning).
+            Config for say/status: --config, then MUSE_RELAY_CONFIG, then ./config.json. No other fallback.
+            An explicit path that doesn't exist is an error; it never falls through to another file.
+            Use -- to end options, e.g. say -- --config is literal text.
             """);
         return 0;
     }
 
-    private static async Task<int> CmdSayAsync(string[] args)
+    private static async Task<int> CmdSayAsync(CliArgs cli)
     {
-        if (args.Length < 2)
+        if (cli.Rest.Count == 0)
         {
-            Console.Error.WriteLine("usage: Chief.Bridge say <text>");
+            Console.Error.WriteLine("usage: Chief.Bridge say [--config <path>] <text>");
             return 1;
         }
 
-        var text = string.Join(' ', args.Skip(1));
-        var cfg = RelayConfig.Load(null);
+        var text = string.Join(' ', cli.Rest);
+        var cfg = RelayConfig.Load(cli.ConfigPath, allowExampleFallback: false);
         Directory.CreateDirectory(cfg.BaseDir);
         var outbox = Path.Combine(cfg.BaseDir, "outbox.jsonl");
         var line = JsonSerializer.Serialize(new { cmd = "chat", text }, JsonUtil.Opts) + "\n";
+        // One append call per line, newline included, so the bridge never sees a half-written line
+        // as complete (it only consumes newline-terminated lines anyway).
         await File.AppendAllTextAsync(outbox, line);
-        Console.WriteLine("queued");
+        Console.WriteLine($"queued -> {outbox}");
         return 0;
     }
 
-    private static int CmdStatus()
+    private static int CmdStatus(CliArgs cli)
     {
-        var cfg = RelayConfig.Load(null);
+        var cfg = RelayConfig.Load(cli.ConfigPath, allowExampleFallback: false);
+        Console.WriteLine($"config: {cfg.ConfigPath} ({cfg.Source})");
         Console.WriteLine($"channel: {cfg.Channel}");
         Console.WriteLine($"nick: {cfg.Nick}");
         var statePath = Path.Combine(cfg.BaseDir, "state.json");
+        Console.WriteLine($"state: {statePath}");
         if (!File.Exists(statePath))
         {
-            Console.WriteLine("alive: false");
-            Console.WriteLine("state: (missing)");
+            Console.WriteLine("alive: false (state.json missing)");
             return 0;
         }
 
@@ -97,392 +141,42 @@ internal static class Program
         {
             using var doc = JsonDocument.Parse(File.ReadAllText(statePath));
             var root = doc.RootElement;
-            var alive = root.TryGetProperty("alive", out var a) && a.ValueKind == JsonValueKind.True;
-            var connected = root.TryGetProperty("connected", out var c) && c.ValueKind == JsonValueKind.True;
-            Console.WriteLine($"alive: {alive}");
-            Console.WriteLine($"connected: {connected}");
-            if (root.TryGetProperty("at", out var at))
-                Console.WriteLine($"at: {at}");
+            bool Flag(string name) => root.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.True;
+            Console.WriteLine($"alive: {(Flag("alive") ? "true" : "false")}");
+            Console.WriteLine($"connected: {(Flag("connected") ? "true" : "false")}");
+            Console.WriteLine($"reconnecting: {(Flag("reconnecting") ? "true" : "false")}");
+            if (root.TryGetProperty("at", out var at) && at.TryGetInt64(out var atSecs))
+                Console.WriteLine($"at: {atSecs} ({DateTimeOffset.FromUnixTimeSeconds(atSecs).ToLocalTime():yyyy-MM-dd HH:mm:ss zzz})");
+            if (root.TryGetProperty("pid", out var pidEl) && pidEl.TryGetInt32(out var pid))
+            {
+                var running = IsRunning(pid);
+                Console.WriteLine(running ? $"pid: {pid} (running)"
+                    : Flag("alive") ? $"pid: {pid} (not running: the bridge died without a clean stop; this state is stale)"
+                    : $"pid: {pid} (not running)");
+            }
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is JsonException or IOException)
         {
             Console.WriteLine($"state: (unreadable: {ex.Message})");
         }
 
         return 0;
     }
-}
 
-internal sealed class RelayConfig
-{
-    public string Url { get; set; } = "wss://hack.chat/chat-ws";
-    public string Origin { get; set; } = "https://hack.chat";
-    public string Channel { get; set; } = "";
-    public string Nick { get; set; } = "";
-    public string Base { get; set; } = ".";
-
-    // Optional hack.chat password; gives this nick a tripcode. Never logged.
-    public string? Pass { get; set; }
-
-    [System.Text.Json.Serialization.JsonIgnore]
-    public string BaseDir { get; set; } = ".";
-
-    [System.Text.Json.Serialization.JsonIgnore]
-    public string ConfigPath { get; set; } = "";
-
-    public static RelayConfig Load(string? cliPath)
+    private static bool IsRunning(int pid)
     {
-        var candidates = new List<string>();
-        if (!string.IsNullOrWhiteSpace(cliPath)
-            && !cliPath.Equals("say", StringComparison.OrdinalIgnoreCase)
-            && !cliPath.Equals("status", StringComparison.OrdinalIgnoreCase)
-            && !cliPath.Equals("help", StringComparison.OrdinalIgnoreCase))
+        try
         {
-            candidates.Add(cliPath);
+            using var p = Process.GetProcessById(pid);
+            return !p.HasExited;
         }
-
-        var env = Environment.GetEnvironmentVariable("MUSE_RELAY_CONFIG");
-        if (!string.IsNullOrWhiteSpace(env))
-            candidates.Add(env);
-
-        var appDir = AppContext.BaseDirectory;
-        candidates.Add(Path.Combine(Directory.GetCurrentDirectory(), "config.json"));
-        candidates.Add(Path.Combine(appDir, "config.json"));
-
-        var walk = new DirectoryInfo(Directory.GetCurrentDirectory());
-        for (var i = 0; i < 5 && walk != null; i++, walk = walk.Parent)
+        catch (ArgumentException)
         {
-            candidates.Add(Path.Combine(walk.FullName, "config.json"));
-            candidates.Add(Path.Combine(walk.FullName, "config.example.json"));
+            return false;
         }
-
-        candidates.Add(Path.Combine(appDir, "config.example.json"));
-
-        string? found = null;
-        foreach (var c in candidates.Distinct())
+        catch (InvalidOperationException)
         {
-            if (File.Exists(c))
-            {
-                found = c;
-                break;
-            }
-        }
-
-        if (found is null)
-        {
-            throw new FileNotFoundException(
-                "No config.json found. Copy config.example.json to config.json or set MUSE_RELAY_CONFIG.");
-        }
-
-        var json = File.ReadAllText(found);
-        var cfg = JsonSerializer.Deserialize<RelayConfig>(json, JsonUtil.Opts)
-                  ?? throw new InvalidOperationException($"Failed to parse {found}");
-
-        if (string.IsNullOrWhiteSpace(cfg.Url))
-            cfg.Url = "wss://hack.chat/chat-ws";
-        if (string.IsNullOrWhiteSpace(cfg.Origin))
-            cfg.Origin = "https://hack.chat";
-        if (string.IsNullOrWhiteSpace(cfg.Channel))
-            throw new InvalidOperationException("config.channel is required");
-        if (string.IsNullOrWhiteSpace(cfg.Nick))
-            throw new InvalidOperationException("config.nick is required");
-
-        var baseRaw = string.IsNullOrWhiteSpace(cfg.Base) ? "." : cfg.Base;
-        var configDir = Path.GetDirectoryName(Path.GetFullPath(found)) ?? Directory.GetCurrentDirectory();
-        cfg.BaseDir = Path.IsPathRooted(baseRaw)
-            ? Path.GetFullPath(baseRaw)
-            : Path.GetFullPath(Path.Combine(configDir, baseRaw));
-
-        Directory.CreateDirectory(cfg.BaseDir);
-        cfg.ConfigPath = found;
-        return cfg;
-    }
-}
-
-internal sealed class HackChatBridge
-{
-    private readonly RelayConfig _cfg;
-    private readonly string _inbox;
-    private readonly string _outbox;
-    private readonly string _unread;
-    private readonly string _state;
-    private long _outPos;
-    private readonly object _fileLock = new();
-
-    public HackChatBridge(RelayConfig cfg)
-    {
-        _cfg = cfg;
-        _inbox = Path.Combine(cfg.BaseDir, "inbox.jsonl");
-        _outbox = Path.Combine(cfg.BaseDir, "outbox.jsonl");
-        _unread = Path.Combine(cfg.BaseDir, "unread.jsonl");
-        _state = Path.Combine(cfg.BaseDir, "state.json");
-        _outPos = File.Exists(_outbox) ? new FileInfo(_outbox).Length : 0;
-    }
-
-    public async Task RunForeverAsync(CancellationToken ct)
-    {
-        var backoff = 1;
-        while (!ct.IsCancellationRequested)
-        {
-            try
-            {
-                await RunOnceAsync(ct);
-                backoff = 1;
-            }
-            catch (OperationCanceledException) when (ct.IsCancellationRequested)
-            {
-                break;
-            }
-            catch (Exception ex)
-            {
-                LogEvent("err", new { error = ex.Message });
-                Console.Error.WriteLine($"[chief] disconnect: {ex.Message}");
-            }
-
-            WriteState(alive: false, connected: false, reconnecting: true);
-            if (ct.IsCancellationRequested) break;
-
-            Console.WriteLine($"[chief] reconnect in {backoff}s…");
-            try
-            {
-                await Task.Delay(TimeSpan.FromSeconds(backoff), ct);
-            }
-            catch (OperationCanceledException)
-            {
-                break;
-            }
-
-            backoff = Math.Min(backoff * 2, 30);
-        }
-
-        WriteState(alive: false, connected: false, reconnecting: false);
-        Console.WriteLine("[chief] stopped");
-    }
-
-    private async Task RunOnceAsync(CancellationToken ct)
-    {
-        using var ws = new ClientWebSocket();
-        ws.Options.SetRequestHeader("Origin", _cfg.Origin);
-
-        Console.WriteLine($"[chief] connecting {_cfg.Url}…");
-        await ws.ConnectAsync(new Uri(_cfg.Url), ct);
-
-        var join = new { cmd = "join", channel = _cfg.Channel, nick = _cfg.Nick };
-        if (string.IsNullOrEmpty(_cfg.Pass))
-            await SendJsonAsync(ws, join, ct);
-        else
-            await SendJsonAsync(ws, new { cmd = "join", channel = _cfg.Channel, nick = _cfg.Nick, pass = _cfg.Pass }, ct);
-        LogEvent("out", join); // logged without the password
-        WriteState(alive: true, connected: true, reconnecting: false);
-        Console.WriteLine($"[chief] joined #{_cfg.Channel} as {_cfg.Nick}");
-
-        using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        var recvTask = ReceiveLoopAsync(ws, linked.Token);
-        var outTask = OutboxLoopAsync(ws, linked.Token);
-
-        await Task.WhenAny(recvTask, outTask);
-        linked.Cancel();
-        try { await Task.WhenAll(recvTask, outTask); }
-        catch { /* drain */ }
-
-        if (ws.State is WebSocketState.Open or WebSocketState.CloseReceived)
-        {
-            try
-            {
-                await ws.CloseAsync(WebSocketCloseStatus.NormalClosure, "bye", CancellationToken.None);
-            }
-            catch { /* ignore */ }
-        }
-
-        throw new IOException("WebSocket session ended");
-    }
-
-    private async Task ReceiveLoopAsync(ClientWebSocket ws, CancellationToken ct)
-    {
-        var buffer = new byte[64 * 1024];
-        var sb = new StringBuilder();
-
-        while (!ct.IsCancellationRequested && ws.State == WebSocketState.Open)
-        {
-            sb.Clear();
-            WebSocketReceiveResult result;
-            do
-            {
-                result = await ws.ReceiveAsync(buffer, ct);
-                if (result.MessageType == WebSocketMessageType.Close)
-                    return;
-                sb.Append(Encoding.UTF8.GetString(buffer, 0, result.Count));
-            } while (!result.EndOfMessage);
-
-            var raw = sb.ToString();
-            JsonNode? node = null;
-            try { node = JsonNode.Parse(raw); }
-            catch { /* fall through */ }
-
-            object msg = node ?? (object)new { raw };
-            LogEvent("in", msg);
-
-            if (node is not null)
-            {
-                var cmd = node["cmd"]?.GetValue<string>();
-                if (cmd == "chat")
-                {
-                    var nick = node["nick"]?.GetValue<string>();
-                    if (!string.IsNullOrEmpty(nick)
-                        && !string.Equals(nick, _cfg.Nick, StringComparison.Ordinal))
-                    {
-                        var text = node["text"]?.GetValue<string>() ?? "";
-                        var channel = node["channel"]?.GetValue<string>() ?? _cfg.Channel;
-                        AppendUnread(new
-                        {
-                            ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
-                            nick,
-                            text,
-                            channel
-                        });
-                    }
-                }
-            }
-
-            WriteState(alive: true, connected: true, reconnecting: false);
-        }
-    }
-
-    private async Task OutboxLoopAsync(ClientWebSocket ws, CancellationToken ct)
-    {
-        while (!ct.IsCancellationRequested && ws.State == WebSocketState.Open)
-        {
-            try
-            {
-                await DrainOutboxAsync(ws, ct);
-            }
-            catch (OperationCanceledException) when (ct.IsCancellationRequested)
-            {
-                return;
-            }
-            catch (Exception ex) when (ws.State == WebSocketState.Open)
-            {
-                LogEvent("err", new { error = $"outbox: {ex.Message}" });
-            }
-
-            try { await Task.Delay(350, ct); }
-            catch (OperationCanceledException) { return; }
-        }
-    }
-
-    private async Task DrainOutboxAsync(ClientWebSocket ws, CancellationToken ct)
-    {
-        if (!File.Exists(_outbox))
-            return;
-
-        long size;
-        lock (_fileLock)
-            size = new FileInfo(_outbox).Length;
-
-        if (size < _outPos)
-            _outPos = 0;
-        if (size == _outPos)
-            return;
-
-        string chunk;
-        lock (_fileLock)
-        {
-            using var fs = new FileStream(_outbox, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
-            fs.Seek(_outPos, SeekOrigin.Begin);
-            using var reader = new StreamReader(fs, Encoding.UTF8);
-            chunk = reader.ReadToEnd();
-            _outPos = fs.Position;
-        }
-
-        foreach (var line in chunk.Split('\n'))
-        {
-            var trimmed = line.Trim();
-            if (trimmed.Length == 0) continue;
-
-            object payload;
-            try
-            {
-                using var doc = JsonDocument.Parse(trimmed);
-                if (doc.RootElement.ValueKind == JsonValueKind.Object
-                    && doc.RootElement.TryGetProperty("cmd", out _))
-                {
-                    payload = JsonNode.Parse(trimmed)!;
-                }
-                else if (doc.RootElement.ValueKind == JsonValueKind.Object
-                         && doc.RootElement.TryGetProperty("text", out var t))
-                {
-                    payload = new { cmd = "chat", text = t.GetString() ?? trimmed };
-                }
-                else
-                {
-                    payload = new { cmd = "chat", text = trimmed };
-                }
-            }
-            catch
-            {
-                payload = new { cmd = "chat", text = trimmed };
-            }
-
-            await SendJsonAsync(ws, payload, ct);
-            LogEvent("out", payload);
-        }
-    }
-
-    private static async Task SendJsonAsync(ClientWebSocket ws, object payload, CancellationToken ct)
-    {
-        var json = payload is JsonNode node
-            ? node.ToJsonString(JsonUtil.Opts)
-            : JsonSerializer.Serialize(payload, JsonUtil.Opts);
-        var bytes = Encoding.UTF8.GetBytes(json);
-        await ws.SendAsync(bytes, WebSocketMessageType.Text, true, ct);
-    }
-
-    private void LogEvent(string dir, object msg)
-    {
-        JsonNode msgNode = msg switch
-        {
-            JsonNode jn => jn.DeepClone(),
-            _ => JsonSerializer.SerializeToNode(msg, JsonUtil.Opts) ?? new JsonObject()
-        };
-
-        var row = new JsonObject
-        {
-            ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
-            ["dir"] = dir,
-            ["msg"] = msgNode
-        };
-        AppendJsonl(_inbox, row.ToJsonString(JsonUtil.Opts));
-    }
-
-    private void AppendUnread(object row)
-    {
-        var line = JsonSerializer.Serialize(row, JsonUtil.Opts);
-        AppendJsonl(_unread, line);
-    }
-
-    private void AppendJsonl(string path, string line)
-    {
-        lock (_fileLock)
-        {
-            File.AppendAllText(path, line + "\n");
-        }
-    }
-
-    private void WriteState(bool alive, bool connected, bool reconnecting)
-    {
-        var obj = new
-        {
-            alive,
-            at = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
-            channel = _cfg.Channel,
-            nick = _cfg.Nick,
-            connected,
-            reconnecting
-        };
-        var json = JsonSerializer.Serialize(obj, JsonUtil.Opts);
-        lock (_fileLock)
-        {
-            File.WriteAllText(_state, json);
+            return false;
         }
     }
 }
