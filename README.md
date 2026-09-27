@@ -59,7 +59,7 @@ Config resolution:
 | Command | Order |
 |---|---|
 | bridge run | `--config` or the first argument → `MUSE_RELAY_CONFIG` → `./config.json` → `./config.example.json` (prints a warning) |
-| `say`, `status` | `--config` → `MUSE_RELAY_CONFIG` → `./config.json`. Nothing else. |
+| `say`, `status`, `watch` | `--config` → `MUSE_RELAY_CONFIG` → `./config.json`. Nothing else. |
 
 - `./` means the current working directory. No parent directories and no app directory are searched, so a stray `config.json` elsewhere is never picked up. (Before the Unreleased fixes, the bridge also walked up to five parent directories and checked the app directory, and `say`/`status` ignored any path you gave them.)
 - An explicit path, or `MUSE_RELAY_CONFIG`, that points at a missing file is an error (exit code 2). It never falls through to another file.
@@ -77,6 +77,27 @@ Runtime files (`inbox.jsonl`, `outbox.jsonl`, `unread.jsonl`, `state.json`) live
 - **Logs.** `inbox.jsonl` records every frame in and out. Frames that aren't JSON objects are logged as `{"raw": "..."}` and otherwise ignored. The join is logged without the pass. Any outbound `pass` field and the `token` in hack.chat's `session` frame are logged as `<redacted>`. JSON is written with a relaxed encoder, so `'` and non-ASCII text stay readable, for example `café ✓ 日本`.
 
 Unit tests: `dotnet test MuseChiefRelay.sln` (xunit, `tests/Chief.Bridge.Tests`).
+
+### Watching the inbox
+
+`watch` turns the inbox into an event feed. It prints new inbound chats as a JSON array and remembers where it stopped:
+
+```bash
+Chief.Bridge watch --config /path/to/config.json
+# [{"nick":"Alex","trip":"","text":"hello","ts":1790468200}]
+
+Chief.Bridge watch --config /path/to/config.json --wait --timeout 1800   # block until something arrives
+```
+
+- **What counts:** inbound `chat` frames (`dir: "in"`), minus the bridge's own nick. The nick comes from the config; override it with `--nick`. Everything else is skipped: other frame types, outbound copies, blank and malformed lines. Each item is `{nick, trip, text, ts}`.
+- **Offset:** default `<base>/.inbox_watch.offset`, or pick one with `--state <file>`. It's a byte offset that always sits on a line boundary. Only complete, newline-terminated lines are consumed, so a line the bridge is still writing is read on the next run, not skipped. The file is written atomically. Run one watcher per offset file.
+- **First run** only records the offset and prints `[]`, so history never floods the first poll. A missing inbox prints `[]`, and once it appears, everything in it counts as new.
+- **Truncated or rotated inbox:** if the file is shorter than the offset, or its first bytes changed, the offset goes back to 0 and the new contents are reported.
+- **Order:** the array is printed before the offset is saved. A crash in between repeats a message instead of losing it.
+- **`--wait`** blocks until at least one new chat qualifies. It wakes on file-system events and polls every second as a fallback. Then it prints the array and exits 0. With `--timeout <seconds>` it gives up, prints `[]` and exits **3**. On SIGTERM or SIGINT it prints `[]` and exits 143 or 130. Usage and config errors exit 2.
+- **Two ways to run it.** A scheduler can poll `watch` every few seconds. An agent that is woken when a background command finishes can run `watch --wait` in the background, handle the output when it exits, and start it again. Messages that arrive in between are waiting for the next run. [`agents/chief.md`](agents/chief.md) spells out both loops.
+- **Replying:** use `say` (`Chief.Bridge say --config <path> <text>`), or append `{"cmd":"chat","text":"..."}` lines to `outbox.jsonl`.
+- `watch` only reads `inbox.jsonl` (and writes its own offset file), so it's safe to run next to a live bridge.
 
 ## Configuration (`config.json`)
 
@@ -150,7 +171,8 @@ Examples (send as the **entire** chat message text):
 | Path | Role |
 |------|------|
 | `src/Chief.Bridge/` | The desktop WSS bridge (.NET 8); the only bridge in this repo |
-| `tests/Chief.Bridge.Tests/` | xunit tests for the bridge's outbox reader, frame handling, config and CLI |
+| `tests/Chief.Bridge.Tests/` | xunit tests for the bridge's outbox reader, frame handling, config, CLI and inbox watcher |
+| `agents/chief.md` | Relay instructions for the chief agent: watch loops, replying, protocol, authority, trust |
 | `web/muse/` | Primary Muse browser client |
 | `docs/protocol.md` | Wire protocol |
 | `docs/security.md` | Trust model: trips, pass handling, what needs a human |
