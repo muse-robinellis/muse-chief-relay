@@ -1,6 +1,5 @@
 (() => {
   const WS_URL = "wss://hack.chat/chat-ws";
-  const DEFAULT_CHANNEL = "fuse-grok-6f4e970cd8";
   const DEFAULT_NICK = "Muse";
 
   const el = {
@@ -9,13 +8,16 @@
     chatPanel: document.getElementById("chat-panel"),
     joinForm: document.getElementById("join-form"),
     channel: document.getElementById("channel"),
+    channelError: document.getElementById("channel-error"),
     nick: document.getElementById("nick"),
+    password: document.getElementById("password"),
     transcript: document.getElementById("transcript"),
     sendForm: document.getElementById("send-form"),
     message: document.getElementById("message"),
     users: document.getElementById("users"),
     metaChannel: document.getElementById("meta-channel"),
     metaNick: document.getElementById("meta-nick"),
+    metaTrip: document.getElementById("meta-trip"),
     disconnect: document.getElementById("disconnect"),
     taskForm: document.getElementById("task-form"),
     opinionForm: document.getElementById("opinion-form"),
@@ -24,8 +26,18 @@
 
   let ws = null;
   let myNick = DEFAULT_NICK;
-  let myChannel = DEFAULT_CHANNEL;
+  // No default channel: the user has to type one (the same one Chief joins).
+  let myChannel = "";
   let online = new Set();
+
+  // The trip password. It lives only in this closure variable, so an automatic
+  // rejoin (backoff or reconnect-on-focus) keeps the same trip. It is never put
+  // in the DOM, never logged, and never written to localStorage, sessionStorage
+  // or the URL. The password field is cleared as soon as Connect is pressed.
+  // Disconnect, a permanently rejected join, or closing the tab forgets it.
+  let myPassword = "";
+  // Our own trip as hack.chat reports it in onlineSet ("" when untripped).
+  let myTrip = "";
 
   // Reconnect state. wantConnected is true between Connect and Disconnect.
   // A socket that closes while it's still true gets retried with backoff.
@@ -46,8 +58,39 @@
   // gets a few retries before we decide the nick really belongs to someone else.
   const FIRST_JOIN_MAX_RETRIES = 3;
 
-  el.channel.value = DEFAULT_CHANNEL;
+  el.channel.value = "";
   el.nick.value = DEFAULT_NICK;
+
+  function showChannelError(on) {
+    el.channelError.classList.toggle("hidden", !on);
+    if (on) el.channel.setAttribute("aria-invalid", "true");
+    else el.channel.removeAttribute("aria-invalid");
+  }
+
+  // hack.chat's legacy join takes "name#password" in the nick field and splits
+  // at the first "#". People still type that into the Nick box, so do the same
+  // split here: the name is the only part that is ever displayed.
+  function splitNick(raw) {
+    const s = String(raw || "");
+    const i = s.indexOf("#");
+    if (i < 0) return { name: s.trim(), secret: "" };
+    return { name: s.slice(0, i).trim(), secret: s.slice(i + 1) };
+  }
+
+  // The nick sent on the wire. Only the join frame ever carries the password.
+  function joinNick() {
+    return myPassword ? myNick + "#" + myPassword : myNick;
+  }
+
+  function forgetPassword() {
+    myPassword = "";
+    el.password.value = "";
+  }
+
+  function setTrip(trip) {
+    myTrip = trip || "";
+    el.metaTrip.textContent = myTrip ? "!" + myTrip : "none";
+  }
 
   function setStatus(text, kind) {
     el.status.textContent = text;
@@ -137,8 +180,21 @@
     return false;
   }
 
+  // Fields that must never be rendered. hack.chat's "session" frame carries a
+  // resumable session token: anyone holding it can restore a session with our
+  // nick and trip without knowing the password, so it's as sensitive as the
+  // password itself.
+  const SECRET_KEYS = new Set(["token", "pass", "password"]);
+  function redact(key, value) {
+    return SECRET_KEYS.has(key) ? "<redacted>" : value;
+  }
+
   function handleMessage(data) {
     const cmd = data && data.cmd;
+    if (cmd === "session") {
+      // Nothing useful to show, and the token must stay off the screen.
+      return;
+    }
     if (cmd === "onlineSet") {
       online = new Set(Array.isArray(data.nicks) ? data.nicks : []);
       renderUsers();
@@ -158,7 +214,7 @@
       return;
     }
     if (cmd === "info" || cmd === "warn") {
-      appendRow({ text: data.text || JSON.stringify(data), kind: "sys" });
+      appendRow({ text: data.text || JSON.stringify(data, redact), kind: "sys" });
       return;
     }
     if (cmd === "chat") {
@@ -177,8 +233,8 @@
       }
       return;
     }
-    // Unknown / other
-    appendRow({ text: JSON.stringify(data), kind: "sys" });
+    // Unknown / other. Redact anything credential-like before showing it.
+    appendRow({ text: JSON.stringify(data, redact), kind: "sys" });
   }
 
   function clearRetry() {
@@ -230,9 +286,11 @@
       online = new Set();
       renderUsers();
       awaitingJoin = true;
-      sendRaw({ cmd: "join", channel: myChannel, nick: myNick });
+      sendRaw({ cmd: "join", channel: myChannel, nick: joinNick() });
+      // Echo the name only. myNick never contains the password.
       appendRow({
-        text: `${hasJoinedOnce ? "rejoining" : "joining"} #${myChannel} as ${myNick}`,
+        text: `${hasJoinedOnce ? "rejoining" : "joining"} #${myChannel} as ${myNick}` +
+          (myPassword ? " (with a trip password)" : ""),
         kind: "sys",
       });
       // Only focus on the first join; refocusing on an auto-rejoin pops the
@@ -245,13 +303,24 @@
       let data;
       try { data = JSON.parse(ev.data); }
       catch { appendRow({ text: String(ev.data), kind: "sys" }); return; }
+      let joinedNow = false;
       if (data && data.cmd === "onlineSet") {
         // Join confirmed, so reset the backoff.
         awaitingJoin = false;
         retryAttempt = 0;
-        hasJoinedOnce = true;
+        joinedNow = true;
       }
       handleMessage(data);
+      if (joinedNow) {
+        const rejoin = hasJoinedOnce;
+        hasJoinedOnce = true;
+        // hack.chat marks our own entry with isme and includes the trip it
+        // computed from the password ("" or missing when there's none).
+        const me = Array.isArray(data.users) ? data.users.find((u) => u && u.isme) : null;
+        setTrip(me && typeof me.trip === "string" ? me.trip : "");
+        const who = myTrip ? `${myNick} !${myTrip}` : `${myNick} (no trip)`;
+        appendRow({ text: `${rejoin ? "rejoined" : "joined"} as ${who}`, kind: "sys" });
+      }
       if (awaitingJoin && data && data.cmd === "warn") {
         // Join rejected. Without this we'd sit "connected" but not in the channel.
         awaitingJoin = false;
@@ -263,6 +332,8 @@
         } else {
           wantConnected = false;
           dropSocket();
+          // Nothing will rejoin now, so there's no reason to keep the password.
+          forgetPassword();
           setStatus("join rejected", "err");
         }
       }
@@ -286,11 +357,16 @@
     };
   }
 
-  function connect(channel, nick) {
-    myChannel = channel || DEFAULT_CHANNEL;
-    myNick = nick || DEFAULT_NICK;
+  function connect(channel, rawNick, password) {
+    const { name, secret } = splitNick(rawNick);
+    myChannel = channel;
+    myNick = name || DEFAULT_NICK;
+    // The password field wins; otherwise fall back to a legacy "name#pw" nick.
+    myPassword = password || secret;
     el.metaChannel.textContent = myChannel;
     el.metaNick.textContent = myNick;
+    myTrip = "";
+    el.metaTrip.textContent = "—"; // until hack.chat confirms the join
     wantConnected = true;
     retryAttempt = 0;
     hasJoinedOnce = false;
@@ -309,15 +385,47 @@
   });
   window.addEventListener("online", reconnectNowIfNeeded);
 
+  // Typing (or pasting) "name#..." into the Nick box moves everything after the
+  // "#" into the password field and focuses it, so the rest of the password is
+  // typed masked instead of in plain sight.
+  el.nick.addEventListener("input", () => {
+    const v = el.nick.value;
+    const i = v.indexOf("#");
+    if (i < 0) return;
+    const rest = v.slice(i + 1);
+    el.nick.value = v.slice(0, i);
+    if (rest) el.password.value = rest;
+    el.password.focus();
+  });
+
+  el.channel.addEventListener("input", () => {
+    if (el.channel.value.trim()) showChannelError(false);
+  });
+
   el.joinForm.addEventListener("submit", (e) => {
     e.preventDefault();
-    connect(el.channel.value.trim(), el.nick.value.trim());
+    const channel = el.channel.value.trim();
+    if (!channel) {
+      // Refuse a blank join. The password (if any) stays in its masked field.
+      showChannelError(true);
+      el.channel.focus();
+      return;
+    }
+    showChannelError(false);
+    const password = el.password.value;
+    // Clear the field right away. The password stays in memory only (myPassword).
+    el.password.value = "";
+    connect(channel, el.nick.value, password);
+    // If the Nick box still held "name#pw" (autofill, or the input handler
+    // didn't run), leave only the name in it.
+    if (el.nick.value.includes("#")) el.nick.value = myNick;
   });
 
   el.disconnect.addEventListener("click", () => {
     wantConnected = false;
     clearRetry();
     dropSocket();
+    forgetPassword();
     showChat(false);
     setStatus("disconnected", "off");
   });

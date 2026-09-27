@@ -10,10 +10,11 @@ claim any nick.
   and can't be forged without it. It's the only identity signal the relay has.
 - Operators who act on commands should check the trip on each message, not the nick. A message from
   a trusted nick with no trip or the wrong trip is just chat.
-- The Muse web client doesn't send a password yet, so its messages have no trip.
+- The Muse web client has an optional **Password** field. Fill it in and your messages carry a trip;
+  leave it empty and they don't. See "Muse web client: password handling" below.
 - In this deployment, Fuse's former trip `!EtBBNv` is **retired**: its secret is lost, so it proves
   nothing. It is not trusted, and a message carrying it is chat, worth flagging to alex. Fuse is
-  untripped until alex confirms a new trip out-of-band. `agents/chief.md` has the operator rules.
+  alex confirmed Fuse's new trip `!xt2keO` out-of-band on 2026-09-27. `agents/chief.md` has the operator rules.
 
 ## Pass handling
 
@@ -24,6 +25,50 @@ claim any nick.
   `session` frame as `<redacted>` too: that token belongs to the connection and has no place in a log.
 - If a pass leaks, pick a new one. The trip changes with it, so update every `publish_trips` and
   trusted-trip list that named the old trip.
+
+## Muse web client: password handling
+
+The client sends the password to hack.chat exactly once per join, as the legacy
+`{"cmd":"join","channel":…,"nick":"name#password"}` frame. hack.chat splits the nick at the first `#`
+and derives the trip from the part after it. Beyond that frame, the client:
+
+- never displays the password: the field is `type="password"` and is cleared as soon as you press
+  Connect; every echo (join line, sidebar, online list) shows only the name;
+- never logs it (no `console.*` calls) and never writes it to `localStorage`, `sessionStorage`,
+  cookies or the URL. The inputs have no `name` attribute, so even a native form submit (script
+  failed to load) can't put them in a query string;
+- keeps it in one JavaScript variable inside the page script's closure (not on `window`) so an
+  automatic rejoin after a dropped socket, a tab coming back into view or the network returning
+  gets the **same trip**. Disconnect, a permanently rejected join, or closing/reloading the tab
+  forgets it;
+- treats a legacy `name#password` typed into the Nick box the same way: as soon as the `#` is typed
+  or pasted, the rest moves into the masked Password field and focus follows it. A `name#password`
+  that reaches Connect without an input event (e.g. autofill) is split at submit, and the Nick box
+  is reset to the name.
+
+The client also never renders hack.chat's `session` frame. Its `token` lets whoever holds it restore
+a session with your nick and trip without the password (hack.chat's `session` command), so it gets
+the same treatment as the password. Other unrecognised frames are shown with any `token`, `pass` or
+`password` field replaced by `<redacted>`.
+
+Limits you should know about:
+
+- hack.chat only uses the text **up to the next `#`** in the password (its legacy join splits with
+  `split('#', 2)`). `abc#def` gives the same trip as `abc`, so don't put `#` in a trip password.
+- Your browser's password manager may offer to save it (`autocomplete="current-password"`). That's
+  your browser's store, not the page's; decline if you don't want it saved.
+- Anything running in the page (a malicious extension, devtools) can read a JS variable. The
+  guarantee is "not shown, not logged, not stored", not "unreadable by code in your own tab".
+- The trip is shown once hack.chat confirms the join (`joined as alex !Ab12Cd`, and under *trip* in
+  the sidebar). Tell operators that trip out-of-band so they can add it to their trusted list.
+
+## Channel names
+
+The channel name is the only thing keeping a hack.chat channel private. The Muse client has no
+default channel and doesn't remember one: you type it each time, and it isn't put in the URL.
+Keep real channel names out of public pages, examples, issues and screenshots, and use a
+placeholder like `your-channel-name`. A name that has been published (including in git history or
+an old GitHub Pages build) should be treated as known; switching to a fresh name is the only fix.
 
 ## Publishing: why untagged means private
 

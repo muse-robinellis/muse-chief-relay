@@ -119,7 +119,10 @@ button.ghost {
   font-weight: 500;
 }
 .hint { color: var(--muted); font-size: 0.82rem; margin: 1rem 0 0; }
-.hint code {
+.field-hint { color: var(--muted); font-size: 0.78rem; margin: -0.35rem 0 0; line-height: 1.4; }
+.field-error { color: var(--danger); font-size: 0.8rem; margin: -0.35rem 0 0; line-height: 1.4; }
+input[aria-invalid="true"] { border-color: var(--danger); }
+.hint code, .field-hint code, .field-error code {
   font-family: var(--mono);
   font-size: 0.78rem;
   background: var(--panel-2);
