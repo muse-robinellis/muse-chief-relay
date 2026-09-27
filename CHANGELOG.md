@@ -4,38 +4,47 @@ Merged work, newest first. Times are ET.
 
 ## Unreleased
 
-- **#12 Chief responsiveness: bridge auto-ack, `watch --settle`, listener status** (open). chief only acts
-  when a background `watch --wait` exits and wakes it, so every reply costs a full wake (about a minute),
-  and a missed re-arm goes unnoticed. On 2026-09-27 a listener exited and wasn't re-armed, and Alex's
-  hello and a task sat for several minutes until he asked. This doesn't make chief think faster. It makes
-  the wait visible and harder to lose.
-  - **Auto-acknowledgement** (`auto_ack` in `config.json`, off by default). When a trusted trip addresses
-    the bridge, the bridge itself posts `(auto) got it, thinking… full reply in about a minute`, or
-    `(auto) got task <id>, …` for a task, in well under a second (about 0.16 s in the live test).
-    `mention_trips` (people) trigger it with a mention or a task. `task_trips` (agents such as Fuse) trigger it
-    only with a task addressed to the bridge, never with plain chat, so there's no bot loop. It never fires for
-    the bridge's own nick or trip, untripped senders, or unlisted trips. There's a global `cooldown_s`
-    (default 60, minimum 10) and `max_per_hour` (default 20). When the watch status says no listener is
-    armed, it sends `offline_text` instead (`…chief's listener isn't armed right now, so the reply may be
-    late`). It's plain chat, not a protocol `ack`, so task state and the status view are unchanged. Sent
-    rows are logged with `"auto":"ack"`; held-back ones as `note` rows.
-  - **`watch --wait --settle <s>`** (0–60 s, off by default). After the first chat, `watch` keeps collecting
-    until the burst has been quiet for `<s>` seconds (capped at 4 × `<s>`), so "hello" plus a question comes
-    back as one wake instead of two. Chats already in hand are delivered even if the timeout or a signal
-    lands during the window. `agents/chief.md` now uses `--settle 3`.
-  - **Watch status file** `<offset file>.status`: `armed`/`settling` with a 5 s heartbeat, then `delivered`,
-    `timed_out`, `stopped` or `polled`, plus pid, deadline, exit code and count. Written atomically.
-    `--wait` warns if another live watcher is armed on the same offset file. A timeout now also prints
-    `re-arm now` on stderr.
-  - **`status`** (and so `hc status`) prints `listener: armed | waking | NOT ARMED | unknown` with the
-    reason: dead pid, stale heartbeat, or how long ago the last watch exited. It also prints how many chats
-    are waiting past the saved offset (read-only) and whether auto-ack is on. New `status --state <file>`.
-    Unknown arguments to `status` are now a usage error.
-  - Docs: README (auto-ack config table, listener table, `--settle`, status file), `agents/chief.md` (settle,
-    "exit 3 is a wake too", checking the listener, what the auto-ack means for chief), `docs/protocol.md`
-    (`(auto)` lines are receipts, not protocol acks), `docs/security.md` (how auto-ack uses trips; also fixes
-    the garbled "Fuse is alex confirmed…" sentence), `config.example.json` (disabled `auto_ack` block).
-  - 85 new tests (167 total).
+- **#12 Chief replies like Fuse: webhook hook poller, bridge auto-ack** (open). Fuse replies in 10–20 s
+  because a 5 s poll script wakes a fresh worker for every inbound chat. chief took about a minute, and
+  sometimes never woke: it relied on a background `watch --wait` exiting to wake it, and on 2026-09-27 at
+  05:05 that watcher did exit 0 with Alex's "hello", but the wake never reached chief. So the wake now comes
+  from a webhook, like Fuse's loop: bridge → `hook` poller → webhook routine → chief drains with `watch` →
+  reply via the outbox.
+  - **`Chief.Bridge hook`**, a C# port of the local `hookpoll.py` stopgap. It watches `inbox.jsonl`
+    (file-system events plus a `poll_s` poll, default 5 s) and POSTs `{"source","channel","chats":[…]}` to
+    the webhook with `Authorization: Bearer <key>`. The first chat after a quiet spell fires at once; later
+    ones are batched by `cooldown_s` (default 15). Optional `trips` filter; the bridge's own nick is always
+    skipped. The URL and key come **only** from environment variables (`url_env`/`auth_env`, default
+    `CHIEF_HOOK_URL`/`CHIEF_HOOK_AUTH`) and are never logged, written to status, or put in the config.
+    https is required except to loopback, redirects aren't followed. Improvements over `hookpoll.py`: the
+    offset moves only after a 2xx (the Python one saved it first, so a crash or restart lost held chats);
+    exponential retry backoff capped by `max_retry_s`; handles a truncated or rotated inbox and half-written
+    lines through the same reader as `watch`; clean SIGTERM (status `stopped`, exit 0); refuses to start
+    (exit 4) while another poller is live on the same offset; `--test` sends one fake chat.
+  - **Hook status** `<base>/.hook.offset.status` (heartbeat every 5 s, last fire time, HTTP result, count,
+    pending, failures, next retry). `status` (and so `hc status`) prints
+    `hook: running | FAILING | NOT RUNNING | unknown | not configured` and `hook last fire: …`, plus
+    `undrained: N chat(s) not yet read by watch` (read-only) and whether auto-ack is on. New
+    `status --state <file>` for a non-default watch offset. Unknown arguments to `status` are now a usage
+    error.
+  - **Auto-acknowledgement** (`auto_ack`, off by default), kept from the first version of this PR. When a
+    trusted trip addresses the bridge, the bridge itself posts `(auto) got it, thinking…` (or
+    `(auto) got task <id>, thinking…`) in well under a second. `mention_trips` (people) trigger it with a
+    mention or a task, `task_trips` (agents such as Fuse) only with a task, so there's no bot loop. Global
+    `cooldown_s` (default 60, minimum 10) and `max_per_hour` (default 20). When the hook poller is NOT
+    RUNNING or FAILING it sends `offline_text` instead (`…chief's wake-up hook isn't working right now, so
+    the reply may be late`). Plain chat, not a protocol `ack`.
+  - **Removed** from the first version of this PR, because they only served the wake-on-exit listener the
+    hook replaces: `watch --settle` (the hook's cooldown batches bursts now), the watch status file with
+    `listener: armed | waking | NOT ARMED` in `status`, the "another watcher is armed" warning, the
+    `re-arm now` stderr line on timeout, and `auto_ack.watch_state`. `watch` itself is exactly as on main;
+    chief now uses it without `--wait` to drain.
+  - Docs: README (Webhook poller section, auto-ack table), `agents/chief.md` (the new loop and why
+    `watch --wait` was dropped, checking the wake-up path), `docs/protocol.md` (local webhook payload,
+    `(auto)` lines), `docs/security.md` (webhook secret handling, auto-ack trips; also fixes the garbled
+    "Fuse is alex confirmed…" sentence), `config.example.json` (`hook` block, disabled `auto_ack`).
+    `.hook.offset*` is gitignored.
+  - 103 new tests (185 total; 50 for the hook, against a local HTTP listener).
 - **#11 Muse: masked password field for trips, and no default channel** (merged 2026-09-27 04:37). Both `docs/muse/` and
   `web/muse/` (kept identical).
   - New optional **Password (optional, for a trip)** field (`type="password"`,
