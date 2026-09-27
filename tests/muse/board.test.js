@@ -207,42 +207,50 @@ test("an empty file yields no records, and a valid record without a trailing new
 });
 
 test("the client does not default a channel, store one, or write the board", () => {
-  const html = fs.readFileSync(path.join(ROOT, "web/muse/index.html"), "utf8");
-  const channel = html.match(/<input id="channel"[^>]*>/)[0];
+  const page = [
+    fs.readFileSync(path.join(ROOT, "web/muse/src/App.vue"), "utf8"),
+    fs.readFileSync(path.join(ROOT, "web/muse/src/RoomBoard.vue"), "utf8"),
+    fs.readFileSync(path.join(ROOT, "web/muse/src/roomBoard.js"), "utf8"),
+  ].join("\n");
+  const channel = page.match(/<input\b[^>]*\bid="channel"[^>]*>/)[0];
   assert.match(channel, /placeholder="your-channel-name"/);
   assert.doesNotMatch(channel, /\svalue=/);
-  assert.match(html, /id="room-board"/);
-  assert.match(html, /Join a channel to see its room board\./);
-  assert.match(html, /id="board-reload"[^>]*disabled/);
-  assert.match(html, /id="board-body"[^>]*aria-live="polite"/);
-  assert.doesNotMatch(html, /aria-readonly/);
-  assert.doesNotMatch(html, /id="board-file"/);
+  assert.match(page, /id="room-board"/);
+  assert.match(page, /Join a channel to see its room board\./);
+  assert.match(page, /id="board-reload"[^>]*disabled/);
+  assert.match(page, /id="board-body"[^>]*aria-live="polite"/);
+  assert.doesNotMatch(page, /aria-readonly/);
+  assert.doesNotMatch(page, /id="board-file"/);
   const src = fs.readFileSync(path.join(ROOT, "web/muse/board.js"), "utf8");
   assert.doesNotMatch(src, /localStorage|sessionStorage|method:\s*["'](PUT|POST|PATCH)|writeFile|appendFile/);
   assert.match(src, /method:\s*"GET"/);
   assert.equal(board.BOARD_FILE, undefined);
   assert.equal(board.RAW_URL, undefined);
 
-  const app = fs.readFileSync(path.join(ROOT, "web/muse/app.js"), "utf8");
+  const app = fs.readFileSync(path.join(ROOT, "web/muse/src/useChat.js"), "utf8");
   const connectBody = app.slice(app.indexOf("function connect("), app.indexOf("function reconnectNowIfNeeded"));
   assert.match(connectBody, /startBoard\(channel\)/);
   const openBody = app.slice(app.indexOf("function openSocket("), app.indexOf("function connect("));
   assert.doesNotMatch(openBody, /startBoard|loadBoardText|boardFileFor/);
-  const disconnectBody = app.slice(app.indexOf("el.disconnect.addEventListener"), app.indexOf("el.sendForm.addEventListener"));
+  const disconnectBody = app.slice(app.indexOf("function disconnect("), app.indexOf("function onSend("));
   assert.match(disconnectBody, /showBoardPlaceholder\(\)/);
-  assert.match(app, /No board for this channel yet\./);
-  assert.match(app, /Room board needs HTTPS or localhost\./);
-  const boardPart = app.slice(app.indexOf("Room board."));
+  assert.match(page, /No board for this channel yet\./);
+  assert.match(page, /Room board needs HTTPS or localhost\./);
+  const boardPart = page.slice(page.indexOf("Room board."));
+  assert.ok(boardPart.length > 40);
   assert.doesNotMatch(boardPart, /localStorage|sessionStorage|console\.|document\.title/);
 });
 
 test("board code uses no innerHTML", () => {
   const src = fs.readFileSync(path.join(ROOT, "web/muse/board.js"), "utf8");
   assert.doesNotMatch(src, /innerHTML/);
-  const app = fs.readFileSync(path.join(ROOT, "web/muse/app.js"), "utf8");
-  const boardPart = app.slice(app.indexOf("Room board."));
+  const vue = fs.readFileSync(path.join(ROOT, "web/muse/src/RoomBoard.vue"), "utf8");
+  const logic = fs.readFileSync(path.join(ROOT, "web/muse/src/roomBoard.js"), "utf8");
+  const boardPart = logic.slice(logic.indexOf("Room board."));
   assert.ok(boardPart.length > 40);
-  assert.doesNotMatch(boardPart, /innerHTML/);
+  assert.doesNotMatch(vue, /innerHTML|v-html/);
+  assert.doesNotMatch(logic, /innerHTML|v-html/);
+  assert.doesNotMatch(boardPart, /innerHTML|v-html/);
 });
 
 test("no tracked text token hashes to a board filename", () => {
@@ -271,17 +279,35 @@ test("no tracked text token hashes to a board filename", () => {
   }
 });
 
-test("docs/muse and web/muse are the same files", () => {
+test("docs/muse is the Vite build of the Vue client, and board.js is the shared reader", () => {
   const docsDir = path.join(ROOT, "docs/muse");
-  const webDir = path.join(ROOT, "web/muse");
-  assert.deepEqual(fs.readdirSync(docsDir).sort(), fs.readdirSync(webDir).sort());
-  for (const name of fs.readdirSync(webDir)) {
-    assert.deepEqual(
-      fs.readFileSync(path.join(docsDir, name)),
-      fs.readFileSync(path.join(webDir, name)),
-      name);
-  }
-  assert.deepEqual(
-    fs.readFileSync(path.join(ROOT, "docs/muse/board.js")),
-    fs.readFileSync(path.join(ROOT, "web/muse/board.js")));
+  const index = fs.readFileSync(path.join(docsDir, "index.html"), "utf8");
+  assert.match(index, /id="app"/);
+  assert.match(index, /src="\.\/assets\//);
+  assert.match(index, /href="\.\/assets\//);
+  assert.doesNotMatch(index, /src="\/assets\//);
+  assert.doesNotMatch(index, /href="\/assets\//);
+  assert.equal(fs.existsSync(path.join(docsDir, "app.js")), false);
+  assert.equal(fs.existsSync(path.join(docsDir, "board.js")), false);
+  assert.equal(fs.existsSync(path.join(docsDir, "styles.css")), false);
+  assert.equal(fs.existsSync(path.join(docsDir, "reconnect.js")), false);
+
+  let published = "";
+  const walk = (dir) => {
+    for (const name of fs.readdirSync(dir)) {
+      const p = path.join(dir, name);
+      if (fs.statSync(p).isDirectory()) walk(p);
+      else if (/\.(html|js|css)$/.test(name)) published += fs.readFileSync(p, "utf8");
+    }
+  };
+  walk(docsDir);
+  assert.match(published, /room-board/);
+  assert.match(published, /board-reload/);
+  assert.match(published, /Join a channel to see its room board\./);
+  assert.match(published, /No board for this channel yet\./);
+  assert.match(published, /Room board needs HTTPS or localhost\./);
+  assert.doesNotMatch(published, /v-html/);
+  assert.doesNotMatch(published, /localStorage|sessionStorage/);
+  assert.equal(typeof board.parseBoard, "function");
+  assert.equal(typeof board.loadBoardText, "function");
 });
