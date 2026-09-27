@@ -28,6 +28,7 @@ internal static class Program
             {
                 "say" => await CmdSayAsync(cli),
                 "status" => CmdStatus(cli),
+                "watch" => await CmdWatchAsync(cli),
                 "help" => CmdHelp(),
                 _ => await RunAsync(cli)
             };
@@ -43,43 +44,58 @@ internal static class Program
     {
         var cfg = RelayConfig.Load(cli.ConfigPath, allowExampleFallback: true);
         using var cts = new CancellationTokenSource();
-
         // SIGTERM / SIGINT: cancel and let RunForeverAsync finish, so the final state.json write
-        // (alive=false) and the "stopped" line happen. A second signal is not intercepted, so the
-        // runtime's default handling terminates the process if shutdown ever hangs.
-        var signals = 0;
-        var registrations = new List<PosixSignalRegistration>();
-        foreach (var sig in new[] { PosixSignal.SIGTERM, PosixSignal.SIGINT })
+        // (alive=false) and the "stopped" line happen.
+        using var signals = new ShutdownSignals(cts, sig => Console.WriteLine($"[chief] {sig} received, shutting down…"));
+
+        Console.WriteLine(
+            $"[chief] config={cfg.ConfigPath} ({cfg.Source}) channel={cfg.Channel} nick={cfg.Nick} base={cfg.BaseDir}");
+        var bridge = new HackChatBridge(cfg);
+        await bridge.RunForeverAsync(cts.Token);
+        return 0;
+    }
+
+    private static async Task<int> CmdWatchAsync(CliArgs cli)
+    {
+        var opts = WatchOptions.Parse(cli.Rest);
+        var cfg = RelayConfig.Load(cli.ConfigPath, allowExampleFallback: false);
+        var nick = opts.Nick ?? cfg.Nick;
+        var statePath = Path.GetFullPath(opts.StatePath ?? Path.Combine(cfg.BaseDir, ".inbox_watch.offset"));
+        var watcher = new InboxWatcher(Path.Combine(cfg.BaseDir, "inbox.jsonl"), statePath, nick);
+
+        void Print(IReadOnlyList<WatchedChat> chats)
         {
-            try
-            {
-                registrations.Add(PosixSignalRegistration.Create(sig, ctx =>
-                {
-                    if (Interlocked.Increment(ref signals) > 1)
-                        return;
-                    ctx.Cancel = true;
-                    Console.WriteLine($"[chief] {ctx.Signal} received, shutting down…");
-                    cts.Cancel();
-                }));
-            }
-            catch (PlatformNotSupportedException)
-            {
-                // Not every signal exists on every OS; the others still work.
-            }
+            Console.Out.WriteLine(WatchedChat.ToJsonArray(chats));
+            Console.Out.Flush();
         }
 
-        try
+        if (!opts.Wait)
         {
-            Console.WriteLine(
-                $"[chief] config={cfg.ConfigPath} ({cfg.Source}) channel={cfg.Channel} nick={cfg.Nick} base={cfg.BaseDir}");
-            var bridge = new HackChatBridge(cfg);
-            await bridge.RunForeverAsync(cts.Token);
+            var poll = watcher.Poll();
+            if (watcher.Warning is { } w)
+                Console.Error.WriteLine($"[chief] warning: {w}");
+            Print(poll.Chats); // printed before the offset is saved: a crash repeats, never loses
+            watcher.Commit(poll);
             return 0;
         }
-        finally
+
+        using var cts = new CancellationTokenSource();
+        using var signals = new ShutdownSignals(cts, null);
+        var outcome = await watcher.WaitAsync(opts.Timeout, Print, cts.Token);
+        if (watcher.Warning is { } warn)
+            Console.Error.WriteLine($"[chief] warning: {warn}");
+
+        switch (outcome)
         {
-            foreach (var r in registrations)
-                r.Dispose();
+            case WaitOutcome.Delivered:
+                return 0;
+            case WaitOutcome.TimedOut:
+                Print(Array.Empty<WatchedChat>());
+                return WatchOptions.ExitTimeout;
+            default:
+                // Stopped by a signal: nothing new was delivered and the offset file is consistent.
+                Print(Array.Empty<WatchedChat>());
+                return 128 + (signals.Received == PosixSignal.SIGINT ? 2 : 15);
         }
     }
 
@@ -92,11 +108,19 @@ internal static class Program
               [--config <path> | <path>]        Run the bridge until SIGTERM / Ctrl+C
               say [--config <path>] <text>      Append one chat line to {base}/outbox.jsonl and exit
               status [--config <path>]          Print channel/nick and the bridge state from state.json
+              watch [--config <path>] [--nick <nick>] [--state <file>] [--wait [--timeout <s>]]
+                                                Print new inbound chats from {base}/inbox.jsonl as a JSON array
+                                                of {nick,trip,text,ts}, skipping the bridge's own nick. The offset
+                                                is kept in --state (default {base}/.inbox_watch.offset); the first
+                                                run only records it and prints []. --wait blocks until at least one
+                                                new chat arrives. Exit codes: 0 printed, 2 usage/config error,
+                                                3 --timeout reached (prints []), 130/143 stopped by SIGINT/SIGTERM
+                                                (prints []).
               help                              This text
 
             Config for the bridge run: --config or the first argument, then MUSE_RELAY_CONFIG, then
             ./config.json, then ./config.example.json (with a warning).
-            Config for say/status: --config, then MUSE_RELAY_CONFIG, then ./config.json. No other fallback.
+            Config for say/status/watch: --config, then MUSE_RELAY_CONFIG, then ./config.json. No other fallback.
             An explicit path that doesn't exist is an error; it never falls through to another file.
             Use -- to end options, e.g. say -- --config is literal text.
             """);

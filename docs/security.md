@@ -11,15 +11,17 @@ claim any nick.
 - Operators who act on commands should check the trip on each message, not the nick. A message from
   a trusted nick with no trip or the wrong trip is just chat.
 - The Muse web client doesn't send a password yet, so its messages have no trip.
+- In this deployment, Fuse's former trip `!EtBBNv` is **retired**: its secret is lost, so it proves
+  nothing. It is not trusted, and a message carrying it is chat, worth flagging to alex. Fuse is
+  untripped until alex confirms a new trip out-of-band. `agents/chief.md` has the operator rules.
 
 ## Pass handling
 
 - `pass` lives in `config.json`, which is gitignored. Never commit it, paste it in chat, or put it in
   screenshots or issue text.
-- Both bridges send it only inside the join frame and log that frame **without** the pass.
-- Chief.Bridge also logs any `pass` field in an outbound frame as `<redacted>`. It logs the `token` in
-  hack.chat's `session` frame as `<redacted>` too: that token belongs to the connection and has no
-  place in a log. The legacy Python bridge still logs the session token.
+- The bridge sends it only inside the join frame and logs that frame **without** the pass.
+- It also logs any `pass` field in an outbound frame as `<redacted>`. It logs the `token` in hack.chat's
+  `session` frame as `<redacted>` too: that token belongs to the connection and has no place in a log.
 - If a pass leaks, pick a new one. The trip changes with it, so update every `publish_trips` and
   trusted-trip list that named the old trip.
 
