@@ -170,6 +170,32 @@ public class InboxWatcherTests
     }
 
     [Fact]
+    public void Rotation_check_covers_every_consumed_byte_while_the_offset_is_under_256()
+    {
+        var (dir, inbox, w) = Setup();
+        using var _ = dir;
+        var first = Chat("Alex", "aaaa");
+        Assert.True(first.Length < InboxWatcher.HeadBytes);
+        File.WriteAllText(inbox, first);
+        PollCommit(w);
+
+        // Growing under 256 bytes is not mistaken for a rotation: the hash never covers bytes past the offset.
+        File.AppendAllText(inbox, Chat("Fuse", "grow"));
+        var grown = w.Poll();
+        Assert.False(grown.Reset);
+        Assert.Equal(new[] { "grow" }, grown.Chats.Select(c => c.Text));
+        w.Commit(grown);
+
+        // A replacement that differs anywhere in the consumed bytes (here the last byte before the offset's
+        // final newline) is caught, even though the file is the same length and the first line is untouched.
+        var replaced = first + Chat("Fuse", "grox") + Chat("Fuse", "new");
+        File.WriteAllText(inbox, replaced);
+        var p = w.Poll();
+        Assert.True(p.Reset);
+        Assert.Equal(new[] { "aaaa", "grox", "new" }, p.Chats.Select(c => c.Text));
+    }
+
+    [Fact]
     public void Missing_inbox_prints_nothing_and_counts_everything_once_it_appears()
     {
         var (dir, inbox, w) = Setup();
@@ -207,6 +233,83 @@ public class InboxWatcherTests
         Assert.True(p.Bootstrapped);
         Assert.Empty(p.Chats);
         Assert.NotNull(w.Warning);
+    }
+
+    [Theory]
+    [InlineData("{\"offset\":0}")]
+    [InlineData("{\"offset\":0,\"head\":null}")]
+    [InlineData("{\"offset\":0,\"head\":42}")]
+    [InlineData("{\"offset\":0,\"head\":\"not-a-hash\"}")]
+    [InlineData("{\"offset\":-1,\"head\":\"0000000000000000000000000000000000000000000000000000000000000000\"}")]
+    public void Json_offset_without_a_valid_head_is_corrupt_and_rebootstraps(string content)
+    {
+        var (dir, inbox, w) = Setup();
+        using var _ = dir;
+        File.WriteAllText(inbox, Chat("Alex", "history"));
+        File.WriteAllText(dir.File(".inbox_watch.offset"), content);
+
+        var p = w.Poll();
+
+        Assert.True(p.Bootstrapped);
+        Assert.Empty(p.Chats);
+        Assert.NotNull(w.Warning);
+        w.Commit(p);
+        var saved = JsonNode.Parse(File.ReadAllText(dir.File(".inbox_watch.offset")))!;
+        Assert.Equal(new FileInfo(inbox).Length, saved["offset"]!.GetValue<long>());
+        Assert.Equal(64, saved["head"]!.GetValue<string>().Length);
+    }
+
+    [Fact]
+    public void Bare_number_offset_is_still_accepted()
+    {
+        var (dir, inbox, w) = Setup();
+        using var _ = dir;
+        File.WriteAllText(inbox, Chat("Alex", "from zero"));
+        File.WriteAllText(dir.File(".inbox_watch.offset"), "0\n");
+
+        Assert.Equal(new[] { "from zero" }, PollCommit(w).Select(c => c.Text));
+        Assert.Null(w.Warning);
+    }
+
+    [Fact]
+    public async Task Wait_keeps_the_offset_warning_after_later_polls()
+    {
+        var (dir, inbox, w) = Setup();
+        using var _ = dir;
+        File.WriteAllText(inbox, Chat("Alex", "history"));
+        File.WriteAllText(dir.File(".inbox_watch.offset"), "garbage");
+
+        var task = w.WaitAsync(TimeSpan.FromSeconds(10), _ => { }, CancellationToken.None);
+        await Task.Delay(400); // several polls read the rewritten, valid offset file
+        File.AppendAllText(inbox, Chat("Fuse", "wake up"));
+
+        Assert.Equal(WaitOutcome.Delivered, await task);
+        Assert.NotNull(w.Warning);
+    }
+
+    [Fact]
+    public async Task Wait_keeps_the_offset_warning_on_timeout()
+    {
+        var (dir, inbox, w) = Setup();
+        using var _ = dir;
+        File.WriteAllText(inbox, Chat("Alex", "history"));
+        File.WriteAllText(dir.File(".inbox_watch.offset"), "{\"offset\":0}");
+
+        Assert.Equal(WaitOutcome.TimedOut, await w.WaitAsync(TimeSpan.FromMilliseconds(350), _ => { }, CancellationToken.None));
+        Assert.NotNull(w.Warning);
+    }
+
+    [Fact]
+    public async Task Wait_with_the_largest_timeout_does_not_overflow()
+    {
+        var (dir, inbox, w) = Setup();
+        using var _ = dir;
+        File.WriteAllText(inbox, "");
+        using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(300));
+        var max = WatchOptions.Parse(["--wait", "--timeout", WatchOptions.MaxTimeoutSeconds.ToString("R", System.Globalization.CultureInfo.InvariantCulture)]).Timeout;
+
+        Assert.Equal(WaitOutcome.Cancelled, await w.WaitAsync(max, _ => { }, cts.Token));
+        Assert.Equal(WaitOutcome.Cancelled, await w.WaitAsync(TimeSpan.MaxValue, _ => { }, new CancellationToken(true)));
     }
 
     [Fact]
@@ -292,6 +395,10 @@ public class WatchOptionsTests
     [InlineData("--timeout", "5")]
     [InlineData("--wait", "--timeout", "-1")]
     [InlineData("--wait", "--timeout", "soon")]
+    [InlineData("--wait", "--timeout", "NaN")]
+    [InlineData("--wait", "--timeout", "Infinity")]
+    [InlineData("--wait", "--timeout", "1e308")]
+    [InlineData("--wait", "--timeout=922337203686")]
     [InlineData("--nick")]
     [InlineData("--nick=")]
     [InlineData("--bogus")]

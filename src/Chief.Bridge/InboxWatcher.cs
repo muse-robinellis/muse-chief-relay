@@ -22,7 +22,9 @@ internal sealed record WatchedChat(string? Nick, string? Trip, string? Text, Jso
 }
 
 /// <summary>Saved read position: a byte offset that always sits on a line boundary, plus a hash of the
-/// file's first bytes so a rotated inbox is noticed even if the new file has already grown past the offset.</summary>
+/// file's first <c>min(256, offset)</c> bytes so a rotated inbox is noticed even if the new file has already
+/// grown past the offset. Below 256 bytes the hash covers every consumed byte; it never covers bytes past the
+/// offset, which may still be growing.</summary>
 internal sealed record WatchOffset(long Offset, string? Head);
 
 /// <summary>Result of one poll. Nothing is saved until <see cref="InboxWatcher.Commit"/>.</summary>
@@ -73,12 +75,15 @@ internal sealed class InboxWatcher
         _pollInterval = pollInterval ?? DefaultPollInterval;
     }
 
-    /// <summary>Set when the offset file existed but couldn't be read; the watcher re-bootstraps.</summary>
+    /// <summary>Set when the offset file existed but couldn't be read; the watcher re-bootstraps. It stays set
+    /// for the life of this instance (later polls read the rewritten file fine), so a caller that checks it after
+    /// <see cref="WaitAsync"/> still sees it.</summary>
     public string? Warning { get; private set; }
 
     public WatchPoll Poll()
     {
-        var saved = ReadOffset();
+        var saved = ReadOffset(out var warning);
+        Warning ??= warning;
 
         if (!File.Exists(_inbox))
         {
@@ -137,7 +142,9 @@ internal sealed class InboxWatcher
     public async Task<WaitOutcome> WaitAsync(
         TimeSpan? timeout, Action<IReadOnlyList<WatchedChat>> deliver, CancellationToken ct)
     {
-        var deadline = timeout is { } t ? DateTime.UtcNow + t : (DateTime?)null;
+        var now = DateTime.UtcNow;
+        // A timeout that reaches past DateTime.MaxValue is as good as none (and would overflow the addition).
+        var deadline = timeout is { } t && t < DateTime.MaxValue - now ? now + t : (DateTime?)null;
         using var changed = new SemaphoreSlim(0, 1);
         using var fsw = TryWatchDirectory(changed);
 
@@ -265,9 +272,9 @@ internal sealed class InboxWatcher
 
     private static string HashHead(byte[] bytes) => Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
 
-    private WatchOffset? ReadOffset()
+    private WatchOffset? ReadOffset(out string? warning)
     {
-        Warning = null;
+        warning = null;
         if (!File.Exists(_offsetPath))
             return null;
 
@@ -277,10 +284,13 @@ internal sealed class InboxWatcher
 
         try
         {
+            // The writer always emits both fields. A JSON offset without a valid head is corrupt: accepting it
+            // would silently switch off rotation detection, so it takes the warning/re-bootstrap path below.
             if (JsonNode.Parse(text) is JsonObject o
-                && o["offset"] is JsonValue ov && ov.TryGetValue<long>(out var off) && off >= 0)
+                && o["offset"] is JsonValue ov && ov.TryGetValue<long>(out var off) && off >= 0
+                && Json.Str(o, "head") is { } head && IsHeadHash(head))
             {
-                return new WatchOffset(off, Json.Str(o, "head"));
+                return new WatchOffset(off, head);
             }
         }
         catch (JsonException)
@@ -288,9 +298,13 @@ internal sealed class InboxWatcher
             // fall through
         }
 
-        Warning = $"offset file {_offsetPath} is unreadable; starting over from the end of the inbox";
+        warning = $"offset file {_offsetPath} is unreadable or corrupt; starting over from the end of the inbox";
         return null;
     }
+
+    /// <summary>What <see cref="HashHead"/> produces: 64 lowercase hex digits.</summary>
+    private static bool IsHeadHash(string s) =>
+        s.Length == 64 && s.All(c => c is >= '0' and <= '9' or >= 'a' and <= 'f');
 
     private void WriteOffset(WatchOffset offset)
     {
@@ -350,6 +364,9 @@ internal sealed record WatchOptions(string? Nick, string? StatePath, bool Wait, 
 {
     public const int ExitTimeout = 3;
 
+    /// <summary>Largest accepted <c>--timeout</c>: whole seconds of <see cref="TimeSpan.MaxValue"/> (about 29,000 years).</summary>
+    public static readonly double MaxTimeoutSeconds = Math.Floor(TimeSpan.MaxValue.TotalSeconds);
+
     public static WatchOptions Parse(IReadOnlyList<string> args)
     {
         string? nick = null, state = null;
@@ -377,9 +394,13 @@ internal sealed record WatchOptions(string? Nick, string? StatePath, bool Wait, 
             else if (a == "--timeout" || a.StartsWith("--timeout=", StringComparison.Ordinal))
             {
                 var v = Value("--timeout");
+                // Reject NaN/infinity and anything TimeSpan can't hold (e.g. 1e308), so every bad value is a
+                // usage error (exit 2) rather than an OverflowException.
                 if (!double.TryParse(v, System.Globalization.NumberStyles.Float,
-                        System.Globalization.CultureInfo.InvariantCulture, out var secs) || secs < 0 || double.IsInfinity(secs))
-                    throw new ArgumentException($"--timeout needs a number of seconds >= 0, got '{v}'");
+                        System.Globalization.CultureInfo.InvariantCulture, out var secs)
+                    || !double.IsFinite(secs) || secs < 0 || secs > MaxTimeoutSeconds)
+                    throw new ArgumentException(
+                        $"--timeout needs a number of seconds from 0 to {MaxTimeoutSeconds:0}, got '{v}'");
                 timeout = TimeSpan.FromSeconds(secs);
             }
             else
