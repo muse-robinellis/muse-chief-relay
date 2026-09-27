@@ -31,10 +31,12 @@ stopped:
 
 ```bash
 Chief.Bridge watch --config <path>
-# [{"nick":"Alex","trip":"","text":"hello","ts":1790468200}]
+# [{"nick":"Alex","trip":null,"text":"hello","ts":1790468200}]
 ```
 
 - An empty array `[]` means nothing new.
+- `trip` is `null` when the sender has no tripcode. Treat that as untripped
+  chat (see "Identity and trust").
 - Your own nick is filtered out, so your `say` echoes never wake you. Use
   `--nick` only if your config's nick isn't the one to skip.
 - The first run only records the offset and prints `[]`, so history never

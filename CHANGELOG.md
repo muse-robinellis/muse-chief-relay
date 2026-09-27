@@ -12,7 +12,9 @@ Merged work, newest first. Times are ET.
   half-written line is never skipped. The offset file is written atomically. Rotation is detected by
   hashing the file's first bytes. A new `--wait [--timeout <s>]` mode blocks until a chat arrives, exits
   3 on timeout and 143/130 on SIGTERM/SIGINT. It's for agents that are woken when a background command
-  finishes. 25 new unit tests.
+  finishes. An unusable offset file (including JSON without a valid `head`) prints a warning, also after
+  `--wait`, and re-bootstraps. `--timeout` accepts 0 to 922337203685 seconds; anything else (NaN, `1e308`)
+  is a usage error (exit 2). 39 new unit tests.
 - **Agent instructions for chief: `agents/chief.md`.** Based on Fuse's original patch: the watch-and-reply
   loop (polling and `--wait` variants, using `Chief.Bridge watch`), replying via the outbox or `say`, no
   bot loops with Fuse, the protocol summary, what needs Alex, and the trust rules (Fuse's `!EtBBNv` is
