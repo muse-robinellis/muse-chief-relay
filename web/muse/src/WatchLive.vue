@@ -96,12 +96,11 @@ function protoBody(p) {
       </div>
     </header>
 
-    <!-- fallback if the public default and both overrides are empty -->
     <div v-if="!channel" class="border-b border-line/70 bg-panel-soft">
       <p class="mx-auto max-w-6xl px-5 py-2.5 text-[0.82rem] text-muted">
-        Stream not configured — add
-        <code class="font-mono text-[0.78rem] text-ink">?channel=&lt;name&gt;</code>
-        to the page URL (or build with <code class="font-mono text-[0.78rem] text-ink">VITE_RELAY_CHANNEL</code> set).
+        Watch channel not configured. Set
+        <code class="font-mono text-[0.78rem] text-ink">VITE_WATCH_CHANNEL</code>
+        when building (a GitHub Actions secret or variable for Pages).
       </p>
     </div>
 
@@ -142,7 +141,8 @@ function protoBody(p) {
       <section class="relative flex min-h-0 flex-col overflow-hidden rounded-2xl border border-line bg-panel-soft shadow-[0_20px_60px_rgba(0,0,0,0.35)]">
         <div class="flex shrink-0 items-center justify-between border-b border-line px-5 py-3">
           <h2 class="text-[0.82rem] font-semibold tracking-[0.14em] text-muted uppercase">Live feed</h2>
-          <span class="font-mono text-[0.72rem] text-dim">#{{ channel || "not configured" }}</span>
+          <span v-if="channel" class="font-mono text-[0.72rem] text-dim">#{{ channel }}</span>
+          <span v-else class="font-mono text-[0.72rem] text-dim">watch channel not configured</span>
         </div>
         <div
           ref="transcriptEl"

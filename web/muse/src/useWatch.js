@@ -6,18 +6,11 @@ import { onWatchFrame } from "./watchSession.js";
 import { parseEnvelope, nickStyle, roleOf, spectatorNick } from "./watchFormat.js";
 
 const WS_URL = "wss://hack.chat/chat-ws";
-// Public room by default so /muse/#/watch needs no ?channel= and no build env.
-// ?channel= wins, then VITE_RELAY_CHANNEL, then that one committed channel.
-// Do not extend the default without Alex's say-so.
+// Channel comes from VITE_WATCH_CHANNEL at dev/build time (a GitHub Actions
+// secret or variable when Pages is built). Unset -> do not join.
 function resolveChannel() {
-  let search = "";
-  try {
-    search = window.location.search;
-  } catch {
-    /* ignore */
-  }
-  const env = import.meta.env && import.meta.env.VITE_RELAY_CHANNEL;
-  return resolveWatchChannel(search, env);
+  const env = import.meta.env && import.meta.env.VITE_WATCH_CHANNEL;
+  return resolveWatchChannel(env);
 }
 const CHANNEL = resolveChannel();
 const BACKOFF_BASE_MS = 1000;
@@ -193,8 +186,8 @@ export function useWatch() {
     dropSocket();
     joined = false;
     if (!CHANNEL) {
-      setStatus("stream not configured", false);
-      pushSys("no channel configured — add ?channel=<name> to the page URL");
+      setStatus("watch channel not configured", false);
+      pushSys("watch channel not configured");
       return;
     }
     setStatus("connecting…", false);

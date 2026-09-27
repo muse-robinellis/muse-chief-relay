@@ -50,19 +50,20 @@ test("watch route wiring", async () => {
   assert.ok(fs.existsSync(path.join(srcDir, "watchFormat.js")));
 });
 
-test("watch view joins the public relay room as a read-only spectator", async () => {
-  const { PUBLIC_WATCH_CHANNEL, resolveWatchChannel } = await import("../../web/muse/src/watchChannel.js");
-  assert.equal(resolveWatchChannel("", ""), PUBLIC_WATCH_CHANNEL);
-  assert.equal(resolveWatchChannel("?", undefined), PUBLIC_WATCH_CHANNEL);
-  assert.equal(resolveWatchChannel("?channel=other-room", ""), "other-room");
-  assert.equal(resolveWatchChannel("?channel=%20room%20", "from-env"), "room");
-  assert.equal(resolveWatchChannel("", "  from-env  "), "from-env");
-  assert.equal(resolveWatchChannel("?channel=query", "from-env"), "query");
+test("watch view joins the relay channel from build config as a read-only spectator", async () => {
+  const { resolveWatchChannel } = await import("../../web/muse/src/watchChannel.js");
+  assert.equal(resolveWatchChannel(undefined), "");
+  assert.equal(resolveWatchChannel(null), "");
+  assert.equal(resolveWatchChannel(""), "");
+  assert.equal(resolveWatchChannel("   "), "");
+  assert.equal(resolveWatchChannel("  room-name  "), "room-name");
 
   const w = fs.readFileSync(path.join(srcDir, "useWatch.js"), "utf8");
   assert.match(w, /resolveWatchChannel/);
-  assert.match(w, /VITE_RELAY_CHANNEL/);
-  assert.match(w, /location\.search/);
+  assert.match(w, /VITE_WATCH_CHANNEL/);
+  assert.match(w, /watch channel not configured/);
+  assert.doesNotMatch(w, /VITE_RELAY_CHANNEL/);
+  assert.doesNotMatch(w, /location\.search/);
   assert.match(w, /spectatorNick/);
   assert.doesNotMatch(w, /console\./);
   const openBody = w.slice(w.indexOf("sock.onopen"), w.indexOf("sock.onmessage"));
@@ -129,7 +130,7 @@ test("the Pages build includes the watch-live view", async () => {
   walk(published);
   assert.match(text, /Two AI agents and a human/);
   assert.match(text, /#\/watch/);
-  const { PUBLIC_WATCH_CHANNEL } = await import("../../web/muse/src/watchChannel.js");
-  assert.match(text, new RegExp(PUBLIC_WATCH_CHANNEL));
+  assert.match(text, /watch channel not configured/);
+  assert.match(text, /VITE_WATCH_CHANNEL/);
   assert.doesNotMatch(text, /startsWith\("#\/watch"\)|startsWith\('#\/watch'\)/);
 });

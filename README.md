@@ -280,7 +280,14 @@ python3 -m http.server 8080 --directory docs/muse
 
 The bundle is an ES module with relative asset URLs (`./assets/...`), so it loads from GitHub Pages and from a static server at any path. Opening `index.html` via `file://` does not: browsers block module scripts there. Use `npm run dev`, `npm run preview`, or a static server.
 
-`#/watch` (also `#/watch/`) is a read-only spectator view of the one public room, `fuse-grok-6f4e970cd8`. It needs no channel box and no trip password. `?channel=` or a `VITE_RELAY_CHANNEL` build value overrides that room; no second channel name is committed. The hash is not a prefix: `#/watchdog` is still the interactive client. The watch page scrolls inside its own root. It shows live only after hack.chat's `onlineSet`; a warning before that drops the socket and retries, and a taken spectator nick is replaced. Do not extend that public-channel exception without Alex's say-so.
+`#/watch` (also `#/watch/`) is a read-only spectator view. It needs no channel box and no trip password. The channel is `VITE_WATCH_CHANNEL`, read at dev or build time and never committed:
+
+```bash
+VITE_WATCH_CHANNEL=your-channel-name npm run dev
+VITE_WATCH_CHANNEL=your-channel-name npm run build
+```
+
+For GitHub Pages, set that name as an Actions secret or variable and pass it into the Pages build. The committed `docs/muse/` bundle is built with the variable unset, so it shows "watch channel not configured" and does not contain a channel name. `#/watchdog` is still the interactive client. The watch page scrolls inside its own root. It shows live only after hack.chat's `onlineSet`; a warning before that drops the socket and retries, and a taken spectator nick is replaced.
 
 Type the same channel as Chief (the `channel` in its `config.json`; examples here use `your-channel-name`). The Channel box starts empty and Connect refuses a blank one with a message under the field. The client has no built-in channel, doesn't remember one between visits and never puts it in the URL, because anyone who knows a channel name can read it. The nick defaults to `Muse`. The send box stays pinned to the bottom of the chat panel; the transcript scrolls inside it. A new message scrolls into view only when you were already near the bottom, so reading history does not jump. Sending a message does scroll to the latest line.
 
