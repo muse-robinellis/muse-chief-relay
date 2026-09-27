@@ -36,6 +36,9 @@ __pycache__/
 node_modules/
 web/muse/dist/
 
+# Rebuildable knowledge index. Markdown under knowledge/ is the source of truth.
+knowledge/.index/
+
 # OS / editor
 .DS_Store
 *.swp
