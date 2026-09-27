@@ -7,7 +7,6 @@ state.json
 bridge.pid
 bridge.stdout
 bridge.stderr
-relay_offset
 relay.log
 STOP_RELAY
 for_alex.jsonl
@@ -15,17 +14,12 @@ tasks/*.json
 results/*
 !results/.gitkeep
 
-# Python
+# Python (tools/status.py)
 __pycache__/
 *.pyc
 .venv/
-legacy/python/config.json
-legacy/python/*.jsonl
-legacy/python/state.json
-legacy/python/bridge.pid
-legacy/python/bridge.std*
 
-# .NET build outputs (do not blanket-ignore all "bin/" — legacy/python/bin holds scripts)
+# .NET build outputs
 **/bin/Debug/
 **/bin/Release/
 **/obj/
@@ -35,7 +29,6 @@ legacy/python/bridge.std*
 *.dll
 *.exe
 *.pdb
-!legacy/python/bin/hc
 
 # OS / editor
 .DS_Store

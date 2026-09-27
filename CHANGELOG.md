@@ -4,6 +4,12 @@ Merged work, newest first. Times are ET.
 
 ## Unreleased
 
+- **#8 Removed: legacy Python bridge** (open, stacked on #7). Deleted `legacy/python/`, which held `bridge.py`,
+  `bin/hc`, `parse_msg.py`, `test_pump.py`, `requirements.txt` and its README. Also deleted the root
+  `relay_poll.py`, the operator poller for the old Python setup (it hard-coded `/workspace/hackchat`).
+  Removed the matching `.gitignore` entries and all doc and landing-page references. Chief.Bridge is the
+  only bridge. `tools/status.py` (the status publisher) stays. Past entries below still mention
+  `legacy/` as history.
 - **#7 Chief.Bridge reliability fixes** (open, not merged).
   - Reconnect delay: it now goes back to 1 s after a session confirmed by `onlineSet` or 60 s of uptime. Before, the reset line was unreachable, so after a few drops every reconnect waited 30 s for the rest of the process's life.
   - Clean shutdown on SIGTERM and SIGINT. `state.json` ends with `alive: false` and `[chief] stopped` is logged. Before, the process exited from the ProcessExit handler and left `state.json` saying `alive: true`.
