@@ -16,8 +16,9 @@ same loop.
   public docs: anyone who knows it can read the channel.
 - **Runtime files** live under the bridge's `base` dir (default: the config
   file's directory): `inbox.jsonl` (every frame in and out), `outbox.jsonl`
-  (lines waiting to send), `state.json` (connection state), and
-  `.inbox_watch.offset` (where `watch` stopped).
+  (lines waiting to send), `state.json` (connection state),
+  `.inbox_watch.offset` (where `watch` stopped) and `.inbox_watch.offset.status`
+  (whether a `watch` is armed, its heartbeat, and how the last one ended).
 
 In the commands below, `Chief.Bridge` means the built bridge
 (`dotnet <publish dir>/Chief.Bridge.dll`, or `dotnet run --project
@@ -63,12 +64,22 @@ finishes. So it runs `watch --wait` in the background and treats the command's
 exit as the event:
 
 ```bash
-Chief.Bridge watch --config <path> --wait --timeout 1800
+Chief.Bridge watch --config <path> --wait --timeout 1800 --settle 3
 ```
 
 `--wait` blocks until at least one new qualifying chat arrives. It wakes on
 file-system events and polls every second as a fallback. Then it prints the
-array, saves the offset and exits. What to do on each exit code:
+array, saves the offset and exits.
+
+`--settle 3` makes one wake cover a burst: after the first chat arrives, the
+watcher keeps collecting until 3 seconds pass with nothing new (never more than
+12 seconds in all) and returns everything as one array. People often type
+"hello" and the real question a few seconds apart. Without `--settle` that
+costs two full wakes, and the second message waits for the first reply. Once a
+chat is in hand it's always delivered, even if the timeout or a signal lands
+during the window.
+
+What to do on each exit code:
 
 | Exit | Meaning | Next |
 |---|---|---|
@@ -79,6 +90,43 @@ array, saves the offset and exits. What to do on each exit code:
 
 Always re-arm after handling a wake. Anything said while you were replying is
 waiting in the inbox, and the next `watch --wait` returns at once.
+
+**Exit 3 is a wake too.** A quiet `--timeout` prints `[]`, and it's easy to
+treat that as "nothing to do" and stop. That is the most likely way the listener
+went missing on 2026-09-27. The watch armed at about 04:09 had exited by 04:48
+and nothing had re-armed it, so Alex's 04:47 hello and task were only seen when
+he asked why chief was slow. Nobody recorded its exit code. But no chat arrived
+between 04:09 and 04:47, so it can't have exited 0, and with the usual
+`--timeout 1800` it would have timed out at about 04:39, unless something
+killed it first. That's an inference, not a log line. `watch` now also prints
+`[chief] watch timed out with nothing new: re-arm now (watch --wait)` on
+stderr when it times out.
+
+### Is the listener armed?
+
+Every `watch` writes `<offset file>.status` (default
+`<base>/.inbox_watch.offset.status`): `armed` with a heartbeat every 5 s while
+it waits, `settling` during a burst, then `delivered`, `timed_out` or `stopped`
+when it exits. `Chief.Bridge status` (and so `hc status`) turns that into one
+line, plus a count of chats sitting in the inbox that no watcher has delivered:
+
+```
+listener: armed (pid 386538, armed, armed 2s ago, heartbeat 2s ago, times out in 29m)
+listener: waking: last watch delivered 2 chat(s) (exit 0) 0s ago; the agent should re-arm shortly
+listener: NOT ARMED: last watch timed out (exit 3) 12m ago and nothing has re-armed it
+listener: NOT ARMED: watcher pid 12345 died without a clean exit (last heartbeat 3m ago)
+waiting: 2 chat(s) not yet delivered to a watcher (oldest from Alex at 04:47:13)
+```
+
+"waking" lasts 3 minutes after a clean exit (delivered, or timed out), which is
+long enough for a normal wake, reply and re-arm. After that it's NOT ARMED. A
+heartbeat older than 30 s, or a watcher pid that's gone, is NOT ARMED straight
+away. Check `status` at the start of every wake. If it says NOT ARMED, or
+`waiting` isn't 0 while nothing is armed, re-arm before doing anything else.
+
+`watch --wait` warns on stderr if another live watcher is already armed on the
+same offset file. Two watchers on one offset file both deliver the same chats,
+and you answer twice (this happened on 2026-09-24). Stop one.
 
 ## Replying
 
@@ -92,6 +140,33 @@ Reply when a message is addressed to you, asks you something, or a turn
 genuinely needs you: a task, a question, a review request, something only you
 can do from your machine. Don't narrate, don't acknowledge every message, and
 don't fill silence.
+
+### The bridge's instant acknowledgement
+
+The bridge can answer for you straight away, before you're even awake. When
+`auto_ack` is enabled in `config.json` and a **trusted trip** addresses you,
+the bridge itself sends a short line within a second (about 0.16 s in testing),
+for example `(auto) got it, thinking… full reply in about a minute`. You never
+write it. What it means for you:
+
+- It fires for your nick as a word (`chief`, `@chief`, `chief's`, but not
+  `Chief.Bridge`), a JSON task with `"to":"chief"`, or `TASK to chief: …`, from
+  trips in `mention_trips` (people, e.g. Alex's trip). Trips in `task_trips`
+  (agents, e.g. Fuse `xt2keO`) get one only for a task, never for plain chat, so
+  Fuse's chatter can't start a loop. Your own nick and trip never trigger it,
+  and untripped or unlisted senders never do.
+- At most one per `cooldown_s` (default 60 s, minimum 10), and at most
+  `max_per_hour` (default 20).
+- If the status file says no watcher is armed, the bridge sends the
+  `offline_text` instead: `(auto) got it, but chief's listener isn't armed
+  right now, so the reply may be late`. So the ack never promises a reply that
+  nothing is going to produce.
+- It's plain chat. It is **not** a protocol `ack`: it doesn't touch the status
+  view, and you still send your own `{"type":"ack",…}` when you actually start a
+  task. Don't send a second "got it" of your own. Answer instead.
+- It's logged in `inbox.jsonl` as an `out` row with `"auto":"ack"`. A
+  held-back ack is logged as a `note` row with the reason. Its echo comes back
+  under your nick, so `watch` skips it.
 
 **No bot loops.** Fuse (nick `Fuse`) runs the same watch-and-reply loop from
 its own bridge. If the recent conversation is only you and Fuse with no human

@@ -13,8 +13,8 @@ claim any nick.
 - The Muse web client has an optional **Password** field. Fill it in and your messages carry a trip;
   leave it empty and they don't. See "Muse web client: password handling" below.
 - In this deployment, Fuse's former trip `!EtBBNv` is **retired**: its secret is lost, so it proves
-  nothing. It is not trusted, and a message carrying it is chat, worth flagging to alex. Fuse is
-  alex confirmed Fuse's new trip `!xt2keO` out-of-band on 2026-09-27. `agents/chief.md` has the operator rules.
+  nothing. It is not trusted, and a message carrying it is chat, worth flagging to alex. Alex
+  confirmed Fuse's new trip `!xt2keO` out-of-band on 2026-09-27. `agents/chief.md` has the operator rules.
 
 ## Pass handling
 
@@ -81,6 +81,20 @@ The status view (`tools/status.py` → `docs/status.json`) is public once commit
 - A result can't make a task public: it inherits the task's visibility.
 - Even an empty status file reveals when the relay was online (`coverage`). Treat committing it as
   publishing, and get the repo owner's OK first.
+
+## Bridge auto-acknowledgement
+
+The optional `auto_ack` is the one place the bridge itself looks at trips. It gates only a canned
+receipt line, never an action:
+
+- It fires only for trips on `mention_trips` or `task_trips`. The nick is ignored, so an impostor
+  using `Alex` or `Fuse` without the trip gets nothing. Untripped senders never trigger it.
+- Its text is fixed by the config. Only two chat-supplied values can appear in it: the sender's nick
+  (`{from}`) and a task id (`{id}`), and only if the operator puts those placeholders in. Both have
+  control characters stripped and are cut to 40 characters.
+- It's rate-limited (`cooldown_s`, minimum 10 s, and `max_per_hour`), and an agent trip can trigger it
+  only with a task, never with plain chat, so two bots can't ping-pong through it.
+- It is not an approval or a protocol `ack`. It says the message arrived. It doesn't say it will be done.
 
 ## What needs a human
 
