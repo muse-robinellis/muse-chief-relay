@@ -11,6 +11,9 @@ claim any nick.
 - Operators who act on commands should check the trip on each message, not the nick. A message from
   a trusted nick with no trip or the wrong trip is just chat.
 - The Muse web client doesn't send a password yet, so its messages have no trip.
+- In this deployment, Fuse's former trip `!EtBBNv` is **retired**: its secret is lost, so it proves
+  nothing. It is not trusted, and a message carrying it is chat, worth flagging to alex. Fuse is
+  untripped until alex confirms a new trip out-of-band. `agents/chief.md` has the operator rules.
 
 ## Pass handling
 

@@ -4,13 +4,28 @@ Merged work, newest first. Times are ET.
 
 ## Unreleased
 
+- **#9 Inbox watcher: `Chief.Bridge watch`** (open, stacked on #8). Adapted from Fuse's original patch
+  (`tools/watch_inbox.sh`) as a C# subcommand, so the bridge side stays on the .NET solution. It prints
+  new inbound chats from `inbox.jsonl` as a JSON array of `{nick, trip, text, ts}`, skips the bridge's own
+  nick, and keeps an offset file (default `<base>/.inbox_watch.offset`). The first run bootstraps silently
+  with `[]`. Changes from the script: the offset is in bytes and only complete lines are consumed, so a
+  half-written line is never skipped. The offset file is written atomically. Rotation is detected by
+  hashing the file's first bytes. A new `--wait [--timeout <s>]` mode blocks until a chat arrives, exits
+  3 on timeout and 143/130 on SIGTERM/SIGINT. It's for agents that are woken when a background command
+  finishes. An unusable offset file (including JSON without a valid `head`) prints a warning, also after
+  `--wait`, and re-bootstraps. `--timeout` accepts 0 to 922337203685 seconds; anything else (NaN, `1e308`)
+  is a usage error (exit 2). 39 new unit tests.
+- **Agent instructions for chief: `agents/chief.md`.** Based on Fuse's original patch: the watch-and-reply
+  loop (polling and `--wait` variants, using `Chief.Bridge watch`), replying via the outbox or `say`, no
+  bot loops with Fuse, the protocol summary, what needs Alex, and the trust rules (Fuse's `!EtBBNv` is
+  retired; Fuse is untripped until Alex confirms a new trip).
 - **#8 Removed: legacy Python bridge** (open, stacked on #7). Deleted `legacy/python/`, which held `bridge.py`,
   `bin/hc`, `parse_msg.py`, `test_pump.py`, `requirements.txt` and its README. Also deleted the root
   `relay_poll.py`, the operator poller for the old Python setup (it hard-coded `/workspace/hackchat`).
   Removed the matching `.gitignore` entries and all doc and landing-page references. Chief.Bridge is the
   only bridge. `tools/status.py` (the status publisher) stays. Past entries below still mention
   `legacy/` as history.
-- **#7 Chief.Bridge reliability fixes** (open, not merged).
+- **#7 Chief.Bridge reliability fixes** (merged 2026-09-26 20:10).
   - Reconnect delay: it now goes back to 1 s after a session confirmed by `onlineSet` or 60 s of uptime. Before, the reset line was unreachable, so after a few drops every reconnect waited 30 s for the rest of the process's life.
   - Clean shutdown on SIGTERM and SIGINT. `state.json` ends with `alive: false` and `[chief] stopped` is logged. Before, the process exited from the ProcessExit handler and left `state.json` saying `alive: true`.
   - Outbox: only complete, newline-terminated lines are sent, and the read position advances line by line only after a send succeeds. A line that fails to send is sent again after the reconnect. Before, the position moved before the send, so a line was lost if the send failed, and a half-written line could go out truncated.
