@@ -4,7 +4,7 @@ Merged work, newest first. Times are ET.
 
 ## Unreleased
 
-- **Muse: masked password field for trips, and no default channel** (open). Both `docs/muse/` and
+- **#11 Muse: masked password field for trips, and no default channel** (open). Both `docs/muse/` and
   `web/muse/` (kept identical).
   - New optional **Password (optional, for a trip)** field (`type="password"`,
     `autocomplete="current-password"`). On join the client sends `nick#password` only when a password
