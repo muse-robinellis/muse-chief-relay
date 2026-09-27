@@ -14,7 +14,7 @@ claim any nick.
   leave it empty and they don't. See "Muse web client: password handling" below.
 - In this deployment, Fuse's former trip `!EtBBNv` is **retired**: its secret is lost, so it proves
   nothing. It is not trusted, and a message carrying it is chat, worth flagging to alex. Fuse is
-  untripped until alex confirms a new trip out-of-band. `agents/chief.md` has the operator rules.
+  alex confirmed Fuse's new trip `!xt2keO` out-of-band on 2026-09-27. `agents/chief.md` has the operator rules.
 
 ## Pass handling
 
