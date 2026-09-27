@@ -21,6 +21,15 @@ same loop.
   `.hook.offset.status` (where the hook poller stopped, and its heartbeat and
   last fire).
 
+The bridge reconnects by itself. A dropped hack.chat socket, a nick that is still
+taken, a rate limit, or a DNS/TLS failure does not mean the process exited: it
+backs off (1 s doubling to 30 s, with jitter) and keeps trying. Leave it alone
+while `state.json` says `reconnecting: true` and the pid is still running.
+It exits on its own only for a bad config (exit 2: missing file, bad JSON, empty
+channel or nick, or a `url` that isn't `ws://` or `wss://`) or because it was
+stopped (SIGINT / SIGTERM, exit 0, `alive: false`). If `status` says the pid is
+not running, something outside the reconnect loop stopped it.
+
 In the commands below, `Chief.Bridge` means the built bridge
 (`dotnet <publish dir>/Chief.Bridge.dll`, or `dotnet run --project
 src/Chief.Bridge --` from a checkout). Installed as a .NET tool, the same

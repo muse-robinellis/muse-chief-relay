@@ -34,7 +34,8 @@
   // rejoin (backoff or reconnect-on-focus) keeps the same trip. It is never put
   // in the DOM, never logged, and never written to localStorage, sessionStorage
   // or the URL. The password field is cleared as soon as Connect is pressed.
-  // Disconnect, a permanently rejected join, or closing the tab forgets it.
+  // Disconnect, a first join that is rejected for good, or closing the tab forgets it.
+  // A drop after a successful join keeps it: that rejoin retries until Disconnect.
   let myPassword = "";
   // Our own trip as hack.chat reports it in onlineSet ("" when untripped).
   let myTrip = "";
@@ -45,18 +46,18 @@
   const BACKOFF_MAX_MS = 30000;
   let wantConnected = false;
   let retryAttempt = 0;
+  // Join warnings only. Socket closes use retryAttempt for backoff and must not
+  // spend the first-join cap.
+  let firstJoinWarns = 0;
   let retryTimer = null;
   let hasJoinedOnce = false;
   let awaitingJoin = false;
 
-  // hack.chat rejects a join with a "warn" and leaves the socket open. After
-  // a mobile tab dies, the old session can hold our nick for a while, so a
-  // taken nick (or a rate limit) is worth retrying; anything else (e.g. an
-  // invalid nick) is permanent.
-  const RETRYABLE_JOIN_WARN = /taken|too fast|rate|wait/i;
-  // A page reload can race its own not-yet-expired session, so a first join
-  // gets a few retries before we decide the nick really belongs to someone else.
-  const FIRST_JOIN_MAX_RETRIES = 3;
+  // Join warnings are decided in reconnect.js (kept identical under web/muse).
+  // After a successful join, every warn is retried: the nick is usually our own
+  // stale session, or the server is rate-limiting. On the very first join, a
+  // taken nick or a rate limit gets a few tries (a reload can race its own
+  // ghost session); any other warn is bad input and stops.
 
   el.channel.value = "";
   el.nick.value = DEFAULT_NICK;
@@ -308,6 +309,7 @@
         // Join confirmed, so reset the backoff.
         awaitingJoin = false;
         retryAttempt = 0;
+        firstJoinWarns = 0;
         joinedNow = true;
       }
       handleMessage(data);
@@ -324,9 +326,9 @@
       if (awaitingJoin && data && data.cmd === "warn") {
         // Join rejected. Without this we'd sit "connected" but not in the channel.
         awaitingJoin = false;
-        const retryable = RETRYABLE_JOIN_WARN.test(data.text || "") &&
-          (hasJoinedOnce || retryAttempt < FIRST_JOIN_MAX_RETRIES);
-        if (retryable) {
+        const warned = MuseReconnect.recordJoinWarn(data.text || "", hasJoinedOnce, firstJoinWarns);
+        firstJoinWarns = warned.firstJoinWarns;
+        if (warned.decision === "retry") {
           dropSocket();
           scheduleReconnect();
         } else {
@@ -348,7 +350,7 @@
       if (sock !== ws) return;
       ws = null;
       awaitingJoin = false;
-      if (!wantConnected) {
+      if (MuseReconnect.onSocketClose(wantConnected) === "stop") {
         setStatus("disconnected", "off");
         return;
       }
@@ -369,6 +371,7 @@
     el.metaTrip.textContent = "—"; // until hack.chat confirms the join
     wantConnected = true;
     retryAttempt = 0;
+    firstJoinWarns = 0;
     hasJoinedOnce = false;
     openSocket();
   }
