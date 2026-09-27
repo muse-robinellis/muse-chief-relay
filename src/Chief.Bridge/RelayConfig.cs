@@ -16,6 +16,9 @@ internal sealed class RelayConfig
     // Optional hack.chat password; gives this nick a tripcode. Sent only in the join frame, never logged.
     public string? Pass { get; set; }
 
+    // Optional instant acknowledgement from the bridge when a trusted trip addresses it. Off by default.
+    [JsonPropertyName("auto_ack")] public AutoAckConfig AutoAck { get; set; } = new();
+
     [JsonIgnore] public string BaseDir { get; set; } = ".";
     [JsonIgnore] public string ConfigPath { get; set; } = "";
     [JsonIgnore] public string Source { get; set; } = "";
@@ -96,11 +99,22 @@ internal sealed class RelayConfig
         if (string.IsNullOrWhiteSpace(cfg.Nick))
             throw new ConfigException($"{path}: nick is required");
 
+        cfg.AutoAck ??= new AutoAckConfig();
+        cfg.AutoAck.Validate(path);
+
         var baseRaw = string.IsNullOrWhiteSpace(cfg.Base) ? "." : cfg.Base;
         var configDir = Path.GetDirectoryName(path) ?? cwd;
         cfg.BaseDir = Path.GetFullPath(baseRaw, configDir);
         cfg.ConfigPath = path;
         cfg.Source = source;
         return cfg;
+    }
+
+    /// <summary>Offset file whose <c>.status</c> the auto-ack checks: <c>auto_ack.watch_state</c> (relative to
+    /// the base dir) or the <c>watch</c> default, <c>&lt;base&gt;/.inbox_watch.offset</c>.</summary>
+    public string AutoAckWatchState()
+    {
+        var raw = string.IsNullOrWhiteSpace(AutoAck.WatchState) ? ".inbox_watch.offset" : AutoAck.WatchState;
+        return Path.GetFullPath(raw, BaseDir);
     }
 }

@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Net.WebSockets;
 using System.Text;
 using System.Text.Json;
@@ -18,6 +19,12 @@ internal sealed class HackChatBridge
     private readonly string _state;
     private readonly OutboxReader _outbox;
     private readonly object _fileLock = new();
+    private readonly AutoAcker _acker;
+    private readonly string _watchStatus;
+    // Auto-acks waiting to go out. Filled by the receive loop, drained by the send loop ahead of the outbox,
+    // which _sendWake wakes early so an ack doesn't wait out the outbox poll.
+    private readonly ConcurrentQueue<JsonObject> _acks = new();
+    private readonly SemaphoreSlim _sendWake = new(0, 1);
 
     public HackChatBridge(RelayConfig cfg)
     {
@@ -29,6 +36,8 @@ internal sealed class HackChatBridge
         // Lines already in the outbox when the process starts are not replayed. The position then lives
         // for the whole process, across reconnects.
         _outbox = OutboxReader.AtEnd(Path.Combine(cfg.BaseDir, "outbox.jsonl"));
+        _acker = new AutoAcker(cfg.AutoAck, cfg.Nick);
+        _watchStatus = WatchStatus.PathFor(cfg.AutoAckWatchState());
     }
 
     private sealed class Session
@@ -92,6 +101,9 @@ internal sealed class HackChatBridge
 
     private async Task RunOnceAsync(Session s, CancellationToken ct)
     {
+        // Acks are best effort and belong to the moment: none carries over from an earlier session.
+        while (_acks.TryDequeue(out _)) { }
+
         using var ws = new ClientWebSocket();
         ws.Options.SetRequestHeader("Origin", _cfg.Origin);
 
@@ -207,15 +219,40 @@ internal sealed class HackChatBridge
     private void HandleFrame(string raw, Session s, TaskCompletionSource<string?> joinResult)
     {
         var frame = InboundFrame.Parse(raw);
+        // Decide on an auto-ack before the chat reaches inbox.jsonl, so the listener state it reports is the one
+        // from before this very message woke the watcher.
+        var ack = frame is { Cmd: "chat", Object: { } chatObj } && s.Confirmed
+            ? _acker.Consider(Json.Str(chatObj, "nick"), Json.Str(chatObj, "trip"), Json.Str(chatObj, "text"),
+                DateTimeOffset.UtcNow, ReadListener)
+            : null;
         LogEvent("in", frame.LogNode);
         if (frame.Object is not { } obj)
             return; // logged as raw; nothing else to do
+
+        if (ack is { Send: true, Text: { } ackText })
+        {
+            _acks.Enqueue(new JsonObject { ["cmd"] = "chat", ["text"] = ackText });
+            WakeSender();
+        }
+        else if (ack is { Suppressed: true })
+        {
+            LogEvent("note", new JsonObject { ["auto_ack"] = "suppressed", ["reason"] = ack.Reason, ["to"] = Json.Str(obj, "nick") });
+        }
 
         switch (frame.Cmd)
         {
             case "onlineSet":
                 s.Confirmed = true;
                 joinResult.TrySetResult(null);
+                if (obj["users"] is JsonArray users)
+                {
+                    foreach (var u in users.OfType<JsonObject>())
+                    {
+                        if (u["isme"] is JsonValue me && me.TryGetValue<bool>(out var isMe) && isMe)
+                            _acker.OwnTrip = Json.Str(u, "trip") is { Length: > 0 } t ? t : null;
+                    }
+                }
+
                 break;
 
             case "warn" when !s.Confirmed:
@@ -248,6 +285,12 @@ internal sealed class HackChatBridge
         {
             ct.ThrowIfCancellationRequested();
 
+            while (_acks.TryDequeue(out var ackFrame))
+            {
+                await SendAsync(ws, sendLock, ackFrame, ct);
+                LogEvent("out", ackFrame, auto: true);
+            }
+
             IReadOnlyList<OutboxLine> pending;
             try
             {
@@ -273,9 +316,25 @@ internal sealed class HackChatBridge
                 _outbox.Commit(line);
             }
 
-            await Task.Delay(OutboxPoll, ct);
+            await _sendWake.WaitAsync(OutboxPoll, ct);
         }
     }
+
+    private void WakeSender()
+    {
+        try
+        {
+            if (_sendWake.CurrentCount == 0)
+                _sendWake.Release();
+        }
+        catch (SemaphoreFullException)
+        {
+            // already signalled
+        }
+    }
+
+    private ListenerView ReadListener() =>
+        ListenerView.Classify(WatchStatus.TryRead(_watchStatus), DateTimeOffset.UtcNow, ProcessInfo.IsRunning);
 
     private static async Task SendAsync(ClientWebSocket ws, SemaphoreSlim sendLock, JsonNode payload, CancellationToken ct)
     {
@@ -316,7 +375,7 @@ internal sealed class HackChatBridge
         }
     }
 
-    private void LogEvent(string dir, JsonNode msg)
+    private void LogEvent(string dir, JsonNode msg, bool auto = false)
     {
         var row = new JsonObject
         {
@@ -324,6 +383,8 @@ internal sealed class HackChatBridge
             ["dir"] = dir,
             ["msg"] = msg.Parent is null ? msg : msg.DeepClone()
         };
+        if (auto)
+            row["auto"] = "ack"; // sent by the bridge itself, not by the agent
         AppendJsonl(_inbox, row.ToJsonString(JsonUtil.Opts));
     }
 

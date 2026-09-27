@@ -35,6 +35,16 @@ internal sealed record WatchPoll(
     bool Reset,
     bool Dirty);
 
+/// <summary>Reported to <see cref="InboxWatcher.WaitAsync"/>'s <c>onTick</c> on every loop.</summary>
+internal enum WatchPhase
+{
+    /// <summary>Nothing new yet.</summary>
+    Waiting,
+
+    /// <summary>At least one chat arrived; waiting out <c>--settle</c> so a burst comes back as one wake.</summary>
+    Settling
+}
+
 internal enum WaitOutcome
 {
     Delivered,
@@ -138,9 +148,18 @@ internal sealed class InboxWatcher
     /// the offset (deliver first, save second: a crash in between repeats a message rather than losing it).
     /// Lines that don't qualify are consumed as they go by. Wakes on file-system events, with a poll every
     /// <c>pollInterval</c> as the fallback.
+    /// <para>
+    /// With <paramref name="settle"/> &gt; 0, the first chat doesn't return at once: the watcher keeps
+    /// collecting until <paramref name="settle"/> passes with no further qualifying chat, or
+    /// <see cref="SettleCapFactor"/> × <paramref name="settle"/> after the first one, whichever comes first, and
+    /// returns them all in one delivery. Once a chat is in hand it is always delivered: neither the timeout nor
+    /// cancellation during the settle window drops it.
+    /// </para>
+    /// <paramref name="onTick"/> is called on every loop (at least every <c>pollInterval</c>), for heartbeats.
     /// </summary>
     public async Task<WaitOutcome> WaitAsync(
-        TimeSpan? timeout, Action<IReadOnlyList<WatchedChat>> deliver, CancellationToken ct)
+        TimeSpan? timeout, Action<IReadOnlyList<WatchedChat>> deliver, CancellationToken ct,
+        TimeSpan? settle = null, Action<WatchPhase>? onTick = null)
     {
         var now = DateTime.UtcNow;
         // A timeout that reaches past DateTime.MaxValue is as good as none (and would overflow the addition).
@@ -153,6 +172,8 @@ internal sealed class InboxWatcher
             var poll = Poll();
             if (poll.Chats.Count > 0)
             {
+                if (settle is { } st && st > TimeSpan.Zero)
+                    poll = await SettleAsync(poll, st, changed, onTick, ct);
                 deliver(poll.Chats);
                 Commit(poll);
                 return WaitOutcome.Delivered;
@@ -161,6 +182,7 @@ internal sealed class InboxWatcher
             Commit(poll);
             if (ct.IsCancellationRequested)
                 return WaitOutcome.Cancelled;
+            onTick?.Invoke(WatchPhase.Waiting);
 
             var wait = _pollInterval;
             if (deadline is { } d)
@@ -180,6 +202,43 @@ internal sealed class InboxWatcher
             {
                 return WaitOutcome.Cancelled;
             }
+        }
+    }
+
+    /// <summary>The settle window never runs longer than this many times <c>--settle</c> after the first chat.</summary>
+    public const int SettleCapFactor = 4;
+
+    /// <summary>Re-polls (nothing is committed in between, so each poll covers everything since the saved offset)
+    /// until the burst goes quiet for <paramref name="settle"/> or the cap is reached. Returns the latest poll.</summary>
+    private async Task<WatchPoll> SettleAsync(
+        WatchPoll first, TimeSpan settle, SemaphoreSlim changed, Action<WatchPhase>? onTick, CancellationToken ct)
+    {
+        var latest = first;
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        var cap = TimeSpan.FromTicks(settle.Ticks * SettleCapFactor);
+        var lastNew = TimeSpan.Zero;
+
+        while (true)
+        {
+            onTick?.Invoke(WatchPhase.Settling);
+            var elapsed = clock.Elapsed;
+            var wait = new[] { _pollInterval, lastNew + settle - elapsed, cap - elapsed }.Min();
+            if (wait <= TimeSpan.Zero)
+                return latest;
+
+            try
+            {
+                await changed.WaitAsync(wait, ct);
+            }
+            catch (OperationCanceledException)
+            {
+                return latest; // stopping: deliver what we already have
+            }
+
+            var p = Poll();
+            if (p.Chats.Count > latest.Chats.Count)
+                lastNew = clock.Elapsed;
+            latest = p;
         }
     }
 
@@ -360,8 +419,11 @@ internal sealed class InboxWatcher
 }
 
 /// <summary>Options for <c>watch</c>, after the global <c>--config</c> has been taken out.</summary>
-internal sealed record WatchOptions(string? Nick, string? StatePath, bool Wait, TimeSpan? Timeout)
+internal sealed record WatchOptions(string? Nick, string? StatePath, bool Wait, TimeSpan? Timeout, TimeSpan? Settle = null)
 {
+    /// <summary>Largest accepted <c>--settle</c>, in seconds. A longer window only delays every wake.</summary>
+    public const double MaxSettleSeconds = 60;
+
     public const int ExitTimeout = 3;
 
     /// <summary>Largest accepted <c>--timeout</c>: whole seconds of <see cref="TimeSpan.MaxValue"/> (about 29,000 years).</summary>
@@ -371,7 +433,7 @@ internal sealed record WatchOptions(string? Nick, string? StatePath, bool Wait, 
     {
         string? nick = null, state = null;
         var wait = false;
-        TimeSpan? timeout = null;
+        TimeSpan? timeout = null, settle = null;
 
         for (var i = 0; i < args.Count; i++)
         {
@@ -403,6 +465,16 @@ internal sealed record WatchOptions(string? Nick, string? StatePath, bool Wait, 
                         $"--timeout needs a number of seconds from 0 to {MaxTimeoutSeconds:0}, got '{v}'");
                 timeout = TimeSpan.FromSeconds(secs);
             }
+            else if (a == "--settle" || a.StartsWith("--settle=", StringComparison.Ordinal))
+            {
+                var v = Value("--settle");
+                if (!double.TryParse(v, System.Globalization.NumberStyles.Float,
+                        System.Globalization.CultureInfo.InvariantCulture, out var secs)
+                    || !double.IsFinite(secs) || secs < 0 || secs > MaxSettleSeconds)
+                    throw new ArgumentException(
+                        $"--settle needs a number of seconds from 0 to {MaxSettleSeconds:0}, got '{v}'");
+                settle = TimeSpan.FromSeconds(secs);
+            }
             else
                 throw new ArgumentException($"watch: unknown argument '{a}'");
         }
@@ -413,7 +485,9 @@ internal sealed record WatchOptions(string? Nick, string? StatePath, bool Wait, 
             throw new ArgumentException("--state needs a value");
         if (timeout is not null && !wait)
             throw new ArgumentException("--timeout only applies with --wait");
+        if (settle is not null && !wait)
+            throw new ArgumentException("--settle only applies with --wait");
 
-        return new WatchOptions(nick, state, wait, timeout);
+        return new WatchOptions(nick, state, wait, timeout, settle);
     }
 }
