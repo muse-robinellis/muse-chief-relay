@@ -4,7 +4,7 @@ Merged work, newest first. Times are ET.
 
 ## Unreleased
 
-- **Inbox watcher: `Chief.Bridge watch`** (stacked on #7 and #8). Adapted from Fuse's original patch
+- **#9 Inbox watcher: `Chief.Bridge watch`** (open, stacked on #8). Adapted from Fuse's original patch
   (`tools/watch_inbox.sh`) as a C# subcommand, so the bridge side stays on the .NET solution. It prints
   new inbound chats from `inbox.jsonl` as a JSON array of `{nick, trip, text, ts}`, skips the bridge's own
   nick, and keeps an offset file (default `<base>/.inbox_watch.offset`). The first run bootstraps silently
