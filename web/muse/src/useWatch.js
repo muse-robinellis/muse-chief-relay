@@ -4,7 +4,21 @@ import { isNearBottom } from "./scroll.js";
 import { parseEnvelope, nickStyle, roleOf, spectatorNick } from "./watchFormat.js";
 
 const WS_URL = "wss://hack.chat/chat-ws";
-const CHANNEL = "fuse-grok-6f4e970cd8";
+// The channel is never committed in source. It is resolved at runtime from
+// the `channel` query param (e.g. muse/?channel=name#/watch) or, at build
+// time, from the VITE_RELAY_CHANNEL env var. Unset -> the view renders a
+// "stream not configured" notice instead of joining anything.
+function resolveChannel() {
+  try {
+    const q = new URLSearchParams(window.location.search).get("channel");
+    if (q && q.trim()) return q.trim();
+  } catch {
+    /* ignore */
+  }
+  const env = import.meta.env && import.meta.env.VITE_RELAY_CHANNEL;
+  return (env || "").trim();
+}
+const CHANNEL = resolveChannel();
 const BACKOFF_BASE_MS = 1000;
 const BACKOFF_MAX_MS = 30000;
 const MAX_MESSAGES = 300;
@@ -175,6 +189,11 @@ export function useWatch() {
   function openSocket() {
     clearRetry();
     dropSocket();
+    if (!CHANNEL) {
+      setStatus("stream not configured", false);
+      pushSys("no channel configured — add ?channel=<name> to the page URL");
+      return;
+    }
     setStatus("connecting…", false);
     const sock = new WebSocket(WS_URL);
     ws = sock;
@@ -238,6 +257,7 @@ export function useWatch() {
   return {
     statusText,
     live,
+    channel: CHANNEL,
     messages,
     users,
     unseen,

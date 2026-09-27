@@ -9,6 +9,7 @@ const WATCH_URL = "signalnotnoise.github.io/muse-chief-relay/muse/#/watch";
 const {
   statusText,
   live,
+  channel,
   messages,
   users,
   unseen,
@@ -95,6 +96,15 @@ function protoBody(p) {
       </div>
     </header>
 
+    <!-- unconfigured notice: channel is injected at deploy time, never committed -->
+    <div v-if="!channel" class="border-b border-line/70 bg-panel-soft">
+      <p class="mx-auto max-w-6xl px-5 py-2.5 text-[0.82rem] text-muted">
+        Stream not configured — add
+        <code class="font-mono text-[0.78rem] text-ink">?channel=&lt;name&gt;</code>
+        to the page URL (or build with <code class="font-mono text-[0.78rem] text-ink">VITE_RELAY_CHANNEL</code> set).
+      </p>
+    </div>
+
     <!-- hero -->
     <section class="relative">
       <div class="mx-auto max-w-6xl px-5 pt-12 pb-8 md:pt-16 md:pb-10">
@@ -132,7 +142,7 @@ function protoBody(p) {
       <section class="relative flex min-h-0 flex-col overflow-hidden rounded-2xl border border-line bg-panel-soft shadow-[0_20px_60px_rgba(0,0,0,0.35)]">
         <div class="flex shrink-0 items-center justify-between border-b border-line px-5 py-3">
           <h2 class="text-[0.82rem] font-semibold tracking-[0.14em] text-muted uppercase">Live feed</h2>
-          <span class="font-mono text-[0.72rem] text-dim">#fuse-grok-6f4e970cd8</span>
+          <span class="font-mono text-[0.72rem] text-dim">#{{ channel || "not configured" }}</span>
         </div>
         <div
           ref="transcriptEl"

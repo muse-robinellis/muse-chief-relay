@@ -308,14 +308,10 @@ test("no tracked text token hashes to a board filename", () => {
     const text = buf.toString("utf8");
     while ((match = re.exec(text))) tokens.add(match[0]);
   }
-  // Exception: the watch-live page (web/muse/src/useWatch.js, route #/watch)
-  // joins this channel from every visitor's browser, so the channel is
-  // intentionally public — it is the promo room Alex approved for the
-  // "watch live" page. The guardrail still applies to every other board
-  // preimage: do not add channel names here without Alex's explicit say-so.
-  const PUBLIC_CHANNEL_TOKENS = new Set(["fuse-grok-6f4e970cd8"]);
+  // No exceptions: channel names must not appear in source. The watch-live
+  // page resolves its channel at runtime (?channel= query param) or build
+  // time (VITE_RELAY_CHANNEL) — never committed.
   for (const token of tokens) {
-    if (PUBLIC_CHANNEL_TOKENS.has(token)) continue;
     const dig = crypto.createHash("sha256").update(token).digest("hex");
     assert.ok(!hashes.includes(dig), "a tracked token hashes to a board filename");
   }

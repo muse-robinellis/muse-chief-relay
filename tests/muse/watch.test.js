@@ -42,7 +42,11 @@ test("watch route wiring", () => {
 
 test("watch view joins the relay channel as a read-only spectator", () => {
   const w = fs.readFileSync(path.join(srcDir, "useWatch.js"), "utf8");
-  assert.match(w, /fuse-grok-6f4e970cd8/);
+  // The channel is never committed in source: it resolves at runtime from the
+  // `channel` query param or the VITE_RELAY_CHANNEL build-time env var.
+  assert.doesNotMatch(w, /fuse-grok-6f4e970cd8/);
+  assert.match(w, /VITE_RELAY_CHANNEL/);
+  assert.match(w, /location\.search/);
   assert.match(w, /spectatorNick/);
   assert.doesNotMatch(w, /console\./);
   const v = fs.readFileSync(path.join(srcDir, "WatchLive.vue"), "utf8");
