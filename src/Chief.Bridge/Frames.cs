@@ -96,6 +96,14 @@ internal static class LogRedaction
             o["pass"] = Redacted;
         return copy;
     }
+
+    /// <summary>
+    /// Error text for an outbox line that produced no frames. Character count only.
+    /// The raw line is never included: a rejected line can still hold a <c>pass</c>,
+    /// token, or other secret, and this string is written to inbox.jsonl.
+    /// </summary>
+    public static string DroppedOutboxLine(string line) =>
+        $"outbox: dropped malformed line ({line.Trim().Length} chars)";
 }
 
 internal static class OutboxPayload
@@ -104,9 +112,10 @@ internal static class OutboxPayload
     /// Turn one outbox line into zero or more frames. A JSON object with a string <c>cmd</c> is sent
     /// as is; an object with a string <c>text</c> becomes a chat. A line may hold several
     /// concatenated JSON objects (two appends that lost the newline between them); each one becomes
-    /// its own frame. Anything else — plain text, a JSON value that is not a sendable envelope, a
-    /// truncated or otherwise malformed line — yields no frames at all: it is dropped, never sent
-    /// verbatim. Fail closed: the channel must never see raw outbox bytes.
+    /// its own frame, but only when every top-level value is an accepted envelope. One non-sendable
+    /// value — plain text, a protocol object, an array, a bare value, truncated input, or trailing
+    /// garbage — drops the whole line, including any valid envelopes beside it. Fail closed: the
+    /// channel must never see raw outbox bytes, and a mixed line must not send a partial result.
     /// Blank lines give no frames (nothing to send).
     /// </summary>
     public static IReadOnlyList<JsonObject> BuildAll(string line)
@@ -135,10 +144,12 @@ internal static class OutboxPayload
             {
                 return Array.Empty<JsonObject>(); // unreachable in practice; fail closed anyway
             }
-            // A JSON value that is not a sendable envelope (array, string, number, or an
-            // object without cmd/text) is skipped, never sent.
-            if (node is JsonObject obj && FromObject(obj) is { } payload)
-                payloads.Add(payload);
+            // A parsed value that is not an accepted envelope fails the whole line.
+            // Skipping it and returning the neighbors would still send a chat from mixed
+            // input such as {"cmd":"chat","text":"a"}{"type":"result","body":"x"}.
+            if (node is not JsonObject obj || FromObject(obj) is not { } payload)
+                return Array.Empty<JsonObject>();
+            payloads.Add(payload);
         }
         return payloads;
     }

@@ -424,13 +424,11 @@ internal sealed class HackChatBridge
                 var payloads = OutboxPayload.BuildAll(line.Text);
                 if (payloads.Count == 0 && line.Text.Trim().Length != 0)
                 {
-                    // Fail-closed: a malformed outbox line is dropped and logged, never sent
-                    // verbatim. (2026-09-27: two envelopes concatenated on one line went out
-                    // as raw JSON under the bridge nick.)
-                    var preview = line.Text.Trim();
-                    if (preview.Length > 160)
-                        preview = preview[..160] + "…";
-                    LogEvent("err", new JsonObject { ["error"] = $"outbox: dropped malformed line: {preview}" });
+                    // Fail-closed: a malformed or mixed outbox line is dropped and logged, never
+                    // sent verbatim. The log is a character count only — the line can still hold
+                    // a pass or token. (2026-09-27: two envelopes concatenated on one line went
+                    // out as raw JSON under the bridge nick.)
+                    LogEvent("err", new JsonObject { ["error"] = LogRedaction.DroppedOutboxLine(line.Text) });
                 }
 
                 foreach (var payload in payloads)

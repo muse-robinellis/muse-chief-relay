@@ -140,6 +140,38 @@ public class OutboxPayloadTests
         Assert.Empty(OutboxPayload.BuildAll(
             "{\"cmd\":\"chat\",\"text\":\"a\"}{\"cmd\":\"chat\",\"text\":\"b\"}trailing"));
     }
+
+    [Fact]
+    public void Mixed_valid_and_nonsendable_value_drops_the_whole_line()
+    {
+        // A sendable envelope glued to a protocol object, an array, or another
+        // non-envelope yields zero frames. Sending the valid neighbor would
+        // break the fail-closed contract.
+        Assert.Empty(OutboxPayload.BuildAll(
+            "{\"cmd\":\"chat\",\"text\":\"a\"}{\"type\":\"result\",\"body\":\"x\"}"));
+        Assert.Empty(OutboxPayload.BuildAll(
+            "{\"type\":\"result\",\"body\":\"x\"}{\"cmd\":\"chat\",\"text\":\"a\"}"));
+        Assert.Empty(OutboxPayload.BuildAll(
+            "{\"cmd\":\"chat\",\"text\":\"a\"}[1,2]"));
+        Assert.Empty(OutboxPayload.BuildAll(
+            "{\"text\":\"hi\"} {\"nope\":true}"));
+    }
+
+    [Fact]
+    public void Dropped_line_diagnostic_is_length_only()
+    {
+        const string secret = "hunter2-session-token";
+        var line = "  {\"type\":\"result\",\"pass\":\"" + secret + "\",\"token\":\"eyJabc\"}  ";
+        var diag = LogRedaction.DroppedOutboxLine(line);
+
+        Assert.Equal($"outbox: dropped malformed line ({line.Trim().Length} chars)", diag);
+        Assert.DoesNotContain(secret, diag);
+        Assert.DoesNotContain("eyJabc", diag);
+        Assert.DoesNotContain("pass", diag);
+        Assert.DoesNotContain("token", diag);
+        Assert.DoesNotContain("result", diag);
+        Assert.DoesNotContain("{", diag);
+    }
 }
 
 public class JsonUtilTests
