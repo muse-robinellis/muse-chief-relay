@@ -72,7 +72,12 @@ internal static class Program
 
         if (!opts.Wait)
         {
-            var poll = watcher.Poll();
+            // A torn read here used to crash with a stack trace; report it as a clean error instead.
+            if (!watcher.TryPoll(out var poll, out var error) || poll is null)
+            {
+                Console.Error.WriteLine($"[chief] watch: cannot read the inbox ({error})");
+                return 2;
+            }
             if (watcher.Warning is { } w)
                 Console.Error.WriteLine($"[chief] warning: {w}");
             Print(poll.Chats); // printed before the offset is saved: a crash repeats, never loses
@@ -159,9 +164,9 @@ internal static class Program
                                                 of {nick,trip,text,ts}, skipping the bridge's own nick. The offset
                                                 is kept in --state (default {base}/.inbox_watch.offset); the first
                                                 run only records it and prints []. --wait blocks until at least one
-                                                new chat arrives. Exit codes: 0 printed, 2 usage/config error,
-                                                3 --timeout reached (prints []), 130/143 stopped by SIGINT/SIGTERM
-                                                (prints []).
+                                                new chat arrives. Exit codes: 0 printed, 2 usage/config error (also an
+                                                unreadable inbox), 3 --timeout reached (prints []), 130/143 stopped
+                                                by SIGINT/SIGTERM (prints []).
               hook [--config <path>] [--test]    Poll {base}/inbox.jsonl and POST new inbound chats to a webhook
                                                 (config "hook" block; URL and key from the environment variables it
                                                 names). Runs until SIGTERM / Ctrl+C. Batches by cooldown, retries

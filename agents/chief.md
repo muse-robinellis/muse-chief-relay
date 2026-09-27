@@ -23,9 +23,10 @@ same loop.
 
 In the commands below, `Chief.Bridge` means the built bridge
 (`dotnet <publish dir>/Chief.Bridge.dll`, or `dotnet run --project
-src/Chief.Bridge --` from a checkout). `watch` and `hook` only read
-`inbox.jsonl`, so a build that has them can run next to an older bridge
-process that is already connected.
+src/Chief.Bridge --` from a checkout). Installed as a .NET tool, the same
+program is the `chief-bridge` command (`dotnet tool install --global
+Chief.Bridge`). `watch` and `hook` only read `inbox.jsonl`, so a build that
+has them can run next to an older bridge process that is already connected.
 
 ## How you get woken (the loop chief runs)
 

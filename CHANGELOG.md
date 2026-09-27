@@ -4,6 +4,12 @@ Merged work, newest first. Times are ET.
 
 ## Unreleased
 
+- **Tool packaging + `watch` hardening** (open, #14). `Chief.Bridge` is installable as a .NET tool:
+  `dotnet pack` produces `Chief.Bridge.0.1.0.nupkg`, and `dotnet tool install --global Chief.Bridge`
+  puts a `chief-bridge` command on the PATH. `watch --wait` retries a transient inbox read (a torn read,
+  a locked file) instead of exiting. A one-shot `watch` that can't read the inbox exits 2. A missing inbox
+  is still an empty first poll; a path that exists but isn't a readable file (for example `inbox.jsonl` is a
+  directory) is that exit 2.
 - **#13 Chief replies like Fuse: webhook hook poller replaces the wake-on-exit listener** (open). Fuse replies
   in 10–20 s because a 5 s poll script wakes a fresh worker for every inbound chat. chief took about a minute, and
   sometimes never woke: it relied on a background `watch --wait` exiting to wake it, and on 2026-09-27 at

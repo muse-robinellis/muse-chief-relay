@@ -37,19 +37,26 @@ cp config.example.json config.json
 # edit channel + nick (and optionally base and pass)
 
 export PATH="$HOME/.dotnet:$PATH"   # if needed
+
+# Run it straight from the repo:
 dotnet run --project src/Chief.Bridge
+
+# …or install it as a .NET tool, which puts `chief-bridge` on your PATH:
+dotnet pack -c Release src/Chief.Bridge
+dotnet tool install --global --add-source src/Chief.Bridge/bin/Release Chief.Bridge
+chief-bridge --config /path/to/config.json
 ```
 
 CLI helpers (same binary):
 
 ```bash
-dotnet run --project src/Chief.Bridge -- status
-dotnet run --project src/Chief.Bridge -- say "hello from chief"
+# With the tool installed, from anywhere, pointing at a specific deployment:
+chief-bridge status --config /path/to/config.json
+chief-bridge say --config /path/to/config.json "hello from chief"
+chief-bridge --config /path/to/config.json          # run the bridge
 
-# From anywhere, pointing at a specific deployment:
-Chief.Bridge status --config /path/to/config.json
-Chief.Bridge say --config /path/to/config.json "hello from chief"
-Chief.Bridge --config /path/to/config.json          # run the bridge
+# …or straight from the repo:
+dotnet run --project src/Chief.Bridge -- status
 ```
 
 `--config <path>` (or `--config=<path>`) works before or after the subcommand. Use `--` to end options when the chat text itself starts with `--`, for example `say -- --config is literal`.
@@ -85,10 +92,10 @@ Unit tests: `dotnet test MuseChiefRelay.sln` (xunit, `tests/Chief.Bridge.Tests`)
 `watch` turns the inbox into an event feed. It prints new inbound chats as a JSON array and remembers where it stopped:
 
 ```bash
-Chief.Bridge watch --config /path/to/config.json
+chief-bridge watch --config /path/to/config.json
 # [{"nick":"Alex","trip":null,"text":"hello","ts":1790468200}]
 
-Chief.Bridge watch --config /path/to/config.json --wait --timeout 1800   # block until something arrives
+chief-bridge watch --config /path/to/config.json --wait --timeout 1800   # block until something arrives
 ```
 
 - **What counts:** inbound `chat` frames (`dir: "in"`), minus the bridge's own nick. The nick comes from the config; override it with `--nick`. Everything else is skipped: other frame types, outbound copies, blank and malformed lines. Each item is `{nick, trip, text, ts}`; `trip` is `null` when the sender has no tripcode (hack.chat omits the field).
@@ -96,9 +103,10 @@ Chief.Bridge watch --config /path/to/config.json --wait --timeout 1800   # block
 - **First run** only records the offset and prints `[]`, so history never floods the first poll. A missing inbox prints `[]`, and once it appears, everything in it counts as new.
 - **Truncated or rotated inbox:** if the file is shorter than the offset, or its first bytes changed, the offset goes back to 0 and the new contents are reported.
 - **Order:** the array is printed before the offset is saved. A crash in between repeats a message instead of losing it.
-- **`--wait`** blocks until at least one new chat qualifies. It wakes on file-system events and polls every second as a fallback. Then it prints the array and exits 0. With `--timeout <seconds>` (0 to 922337203685) it gives up, prints `[]` and exits **3**. On SIGTERM or SIGINT it prints `[]` and exits 143 or 130. Usage and config errors exit 2.
+- **`--wait`** blocks until at least one new chat qualifies. It wakes on file-system events and polls every second as a fallback. Then it prints the array and exits 0. With `--timeout <seconds>` (0 to 922337203685) it gives up, prints `[]` and exits **3**. On SIGTERM or SIGINT it prints `[]` and exits 143 or 130. Usage and config errors exit 2, as does a one-shot run whose inbox can't be read. A missing inbox is an empty poll; a path that is there but isn't a readable file (a directory, or no permission) is exit 2.
+- **Transient read failures:** if a poll can't read the inbox (a torn read, a locked file), `watch --wait` doesn't die: it records a warning, printed on stderr when the wait ends, and retries on the next loop.
 - **Ways to run it.** An agent woken by the webhook poller (below) runs plain `watch` to drain everything new, which is what chief does now. A scheduler can poll `watch` every few seconds. An agent that is woken when a background command finishes can run `watch --wait` in the background and start it again after each exit, but chief found that wake unreliable (see `agents/chief.md`). Messages that arrive in between are waiting for the next run.
-- **Replying:** use `say` (`Chief.Bridge say --config <path> <text>`), or append `{"cmd":"chat","text":"..."}` lines to `outbox.jsonl`.
+- **Replying:** use `say` (`chief-bridge say --config <path> <text>`), or append `{"cmd":"chat","text":"..."}` lines to `outbox.jsonl`.
 - `watch` only reads `inbox.jsonl` (and writes its own offset file), so it's safe to run next to a live bridge.
 
 ### Webhook poller (`hook`)
