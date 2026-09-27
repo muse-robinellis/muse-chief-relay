@@ -62,6 +62,31 @@ public class PrivacyGuardTests
     }
 
     [Fact]
+    public void Lowercase_bearer_and_bare_akia_key_id_fail_closed()
+    {
+        var lowerBearer = string.Concat("author", "ization: bea", "rer ", "abcdefghijklmnop");
+        var bareAkia = string.Concat("AK", "IAIOSFODNN7EXAMPLE");
+        var prefixedToken = string.Concat("ghp_", "abcdefghijklmnopqrst");
+
+        AssertKind(lowerBearer, "bearer");
+        AssertKind(bareAkia, "API token");
+        AssertKind(prefixedToken, "API token");
+        Assert.DoesNotContain(PrivacyGuard.Scan("planted.md", bareAkia), f => f.Message.Contains("EXAMPLE"));
+        // Case still matters for the AKIA alternative; prose must not trip it.
+        Assert.Empty(PrivacyGuard.Scan("prose.md", "The akia was a typo for akira."));
+
+        using var dir = new TempDir();
+        Fixtures.WriteNote(dir.Path, "leaked", "The key id " + bareAkia + " must not ship.");
+        var stderr = new StringWriter();
+        var code = KnowledgeCli.Run(["check", "--knowledge", dir.Path], new StringWriter(), stderr);
+        Assert.Equal(1, code);
+        var report = stderr.ToString();
+        Assert.Contains("refused", report, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("API token", report, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("AKIAIOSFODNN7EXAMPLE", report);
+    }
+
+    [Fact]
     public void Json_form_and_prefixed_names_fail_closed()
     {
         var jsonPassword = string.Concat("\"pass", "word\": \"", "hunter2supersecret\"");
