@@ -45,11 +45,38 @@ CLI helpers (same binary):
 ```bash
 dotnet run --project src/Chief.Bridge -- status
 dotnet run --project src/Chief.Bridge -- say "hello from chief"
+
+# From anywhere, pointing at a specific deployment:
+Chief.Bridge status --config /path/to/config.json
+Chief.Bridge say --config /path/to/config.json "hello from chief"
+Chief.Bridge --config /path/to/config.json          # run the bridge
 ```
 
-Config resolution order: first CLI arg (path) → `MUSE_RELAY_CONFIG` → `./config.json` → nearby `config.example.json`.
+`--config <path>` (or `--config=<path>`) works before or after the subcommand. Use `--` to end options when the chat text itself starts with `--`, for example `say -- --config is literal`.
+
+Config resolution:
+
+| Command | Order |
+|---|---|
+| bridge run | `--config` or the first argument → `MUSE_RELAY_CONFIG` → `./config.json` → `./config.example.json` (prints a warning) |
+| `say`, `status` | `--config` → `MUSE_RELAY_CONFIG` → `./config.json`. Nothing else. |
+
+- `./` means the current working directory. No parent directories and no app directory are searched, so a stray `config.json` elsewhere is never picked up. (Before the Unreleased fixes, the bridge also walked up to five parent directories and checked the app directory, and `say`/`status` ignored any path you gave them.)
+- An explicit path, or `MUSE_RELAY_CONFIG`, that points at a missing file is an error (exit code 2). It never falls through to another file.
+- `say` prints the outbox it wrote to, and `status` prints the config it read, so you can see which deployment you touched.
 
 Runtime files (`inbox.jsonl`, `outbox.jsonl`, `unread.jsonl`, `state.json`) live under `base` from config (default: directory of the config file). **Do not commit them.**
+
+### How the bridge behaves
+
+- **Join.** After connecting, the bridge sends `join` and waits for hack.chat's `onlineSet`. Only then does `state.json` say `connected: true`, and only then does it start sending outbox lines. A `warn` before `onlineSet` (for example `Nickname taken`) counts as a rejected join. So does no `onlineSet` within 15 s. Either way the bridge disconnects and retries.
+- **Reconnect.** The delay starts at 1 s and doubles to a 30 s cap. It goes back to 1 s after any session that was confirmed by `onlineSet` or stayed up for 60 s. Rejected or failed attempts keep doubling.
+- **Outbox.** The bridge sends only complete, newline-terminated lines. A line still being written waits for its newline. The read position moves past a line only after its send succeeds. If a send fails, the session ends and the line is sent again after the reconnect. The position lives in memory for the life of the process. Lines already in `outbox.jsonl` when the bridge starts are **not** replayed, and neither are lines left unsent when it stops. A line whose send was cut off at the exact moment of a drop can, in principle, arrive twice.
+- **Shutdown.** SIGTERM or Ctrl+C (SIGINT) closes the socket, writes `state.json` with `alive: false`, and logs `[chief] stopped`. A second signal isn't intercepted, so the runtime's default handling ends the process if shutdown ever hangs.
+- **`state.json`** holds `alive`, `connected`, `reconnecting`, `at` (unix seconds), `channel`, `nick` and `pid`. It is written atomically (temp file, then rename). `status` reports whether that pid is still running. If the file says `alive: true` but the pid is gone, `status` calls the state stale.
+- **Logs.** `inbox.jsonl` records every frame in and out. Frames that aren't JSON objects are logged as `{"raw": "..."}` and otherwise ignored. The join is logged without the pass. Any outbound `pass` field and the `token` in hack.chat's `session` frame are logged as `<redacted>`. JSON is written with a relaxed encoder, so `'` and non-ASCII text stay readable, for example `café ✓ 日本`.
+
+Unit tests: `dotnet test MuseChiefRelay.sln` (xunit, `tests/Chief.Bridge.Tests`).
 
 Operator helper (optional): `python3 relay_poll.py` reads new inbound chats from `inbox.jsonl` with an offset file so long-running loops skip own echoes.
 
@@ -125,6 +152,7 @@ Examples (send as the **entire** chat message text):
 | Path | Role |
 |------|------|
 | `src/Chief.Bridge/` | Primary desktop WSS bridge (.NET 8) |
+| `tests/Chief.Bridge.Tests/` | xunit tests for the bridge's outbox reader, frame handling, config and CLI |
 | `web/muse/` | Primary Muse browser client |
 | `docs/protocol.md` | Wire protocol |
 | `docs/security.md` | Trust model: trips, pass handling, what needs a human |
@@ -139,7 +167,7 @@ Examples (send as the **entire** chat message text):
 
 ## Legacy Python
 
-The original Python bridge lives under `legacy/python/` for reference. Prefer Chief.Bridge + `web/muse` for new work.
+The original Python bridge lives under `legacy/python/` for reference. **Chief.Bridge is the primary bridge.** Prefer it and `web/muse` for new work. This deployment's `chief` moved from the Python bridge to Chief.Bridge on 2026-09-26. It is still on a build from before the Unreleased fixes, and gets them only when they're merged and redeployed.
 
 ```bash
 cd legacy/python

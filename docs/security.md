@@ -17,6 +17,9 @@ claim any nick.
 - `pass` lives in `config.json`, which is gitignored. Never commit it, paste it in chat, or put it in
   screenshots or issue text.
 - Both bridges send it only inside the join frame and log that frame **without** the pass.
+- Chief.Bridge also logs any `pass` field in an outbound frame as `<redacted>`. It logs the `token` in
+  hack.chat's `session` frame as `<redacted>` too: that token belongs to the connection and has no
+  place in a log. The legacy Python bridge still logs the session token.
 - If a pass leaks, pick a new one. The trip changes with it, so update every `publish_trips` and
   trusted-trip list that named the old trip.
 
