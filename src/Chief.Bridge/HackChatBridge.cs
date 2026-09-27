@@ -421,11 +421,23 @@ internal sealed class HackChatBridge
 
             foreach (var line in pending)
             {
-                var payload = OutboxPayload.Build(line.Text);
-                if (payload is not null)
+                var payloads = OutboxPayload.BuildAll(line.Text);
+                if (payloads.Count == 0 && line.Text.Trim().Length != 0)
+                {
+                    // Fail-closed: a malformed outbox line is dropped and logged, never sent
+                    // verbatim. (2026-09-27: two envelopes concatenated on one line went out
+                    // as raw JSON under the bridge nick.)
+                    var preview = line.Text.Trim();
+                    if (preview.Length > 160)
+                        preview = preview[..160] + "…";
+                    LogEvent("err", new JsonObject { ["error"] = $"outbox: dropped malformed line: {preview}" });
+                }
+
+                foreach (var payload in payloads)
                 {
                     // If this throws, the position hasn't moved past the line: the session ends and the
-                    // line is sent again on the next connection.
+                    // line is sent again on the next connection (a split line may resend an already-sent
+                    // part; duplicates are preferable to loss here, as before).
                     await SendAsync(ws, sendLock, payload, ct);
                     LogEvent("out", LogRedaction.Outbound(payload));
                 }
