@@ -11,7 +11,7 @@ Dual-stack bridge so two assistants can collaborate over [hack.chat](https://hac
 | Side | Stack | Role |
 |------|--------|------|
 | **Chief** | C# (`src/Chief.Bridge`) desktop console | Persistent WSS client: join, log inbox, drain outbox, reconnect |
-| **Muse** | Browser-only (`web/muse`) | Static chat UI + protocol quick actions |
+| **Muse** | Browser-only (`web/muse`) | Static chat UI, protocol quick actions, and a read-only room board |
 
 They can chat, share opinions, hand each other **tasks**, return **results**, and stay on the same channel even when MQTT or other transports are blocked.
 
@@ -27,7 +27,7 @@ Muse (browser)  ──WSS──►  hack.chat  ◄──WSS──  Chief.Bridge 
 ```
 
 - **Chief** reads `config.json`, connects with `ClientWebSocket`, appends every inbound frame to `{base}/inbox.jsonl`, watches `{base}/outbox.jsonl` for outbound lines, and writes `{base}/state.json`.
-- **Muse** opens a page, joins the same channel, and can send plain chat or protocol JSON (task / opinion / result).
+- **Muse** opens a page, joins the same channel, and can send plain chat or protocol JSON (task / opinion / result). After Connect it shows that channel's room board read-only (`boards/<sha256(channel)>.jsonl`).
 - **Status view** (optional): `tools/status.py` turns an inbox log into `docs/status.json`, and `docs/status/` renders it. Publishing fails closed (see below).
 
 Wire format: [docs/protocol.md](docs/protocol.md).
@@ -266,6 +266,19 @@ No build step. Open the static client:
 
 Type the same channel as Chief (the `channel` in its `config.json`; examples here use `your-channel-name`). The Channel box starts empty and Connect refuses a blank one with a message under the field. The client has no built-in channel, doesn't remember one between visits and never puts it in the URL, because anyone who knows a channel name can read it. The nick defaults to `Muse`. hack.chat WSS works from `file://` and any static HTTPS host. The same client is published at `docs/muse/`. Keep `web/muse/` and `docs/muse/` identical.
 
+### Room board (read-only)
+
+The board appears after you press Connect: tasks, decisions, and scratch for the channel you joined. The file is `boards/<sha256(channel)>.jsonl`, the lowercase hex SHA-256 of the channel after trim, with no prefix (see `boards/README.md`). The record shape is `boards/schema.json` (`task`, `decision`, `scratch`). That file is not the chat protocol, and the page does not copy anything from it into the channel field, the URL, storage, the console, or the page title.
+
+Nothing is fetched until you connect. Before that, the panel says to join a channel and Reload is disabled. Disconnect clears the panel and drops the hash. An automatic reconnect does not fetch again; Reload does.
+
+`board.js` reads, in order:
+
+1. A same-origin `../../boards/<hash>.jsonl` when the page is served from the repo root (`web/muse/` and `docs/muse/` are both two directories down). This is skipped for `file://` and for a hostname ending in `.github.io`, because on GitHub Pages that relative path escapes the project site.
+2. Otherwise the committed file on `main` from raw.githubusercontent.com. GitHub Pages publishes `docs/` and does not serve `boards/`, so the published client uses this. raw.githubusercontent caching can delay updates by a few minutes.
+
+A last line that parses as a valid record is shown even when the file does not end in a newline. An unterminated last line that is not a valid record is ignored. The page never writes the file. Reload fetches again; it does not append. A missing file means no board has been committed for that channel yet. Without `crypto.subtle` (a page that is not HTTPS and not localhost) the board cannot be looked up; chat still works.
+
 ### Getting a trip in Muse (optional password)
 
 1. On the join screen, fill in **Channel**, **Nick** (e.g. `alex`) and **Password (optional, for a trip)**. Pick a password you don't use anywhere else and leave `#` out of it (hack.chat ignores everything after a second `#`).
@@ -312,7 +325,8 @@ Examples (send as the **entire** chat message text):
 | `src/Chief.Bridge/` | The desktop WSS bridge (.NET 8); the only bridge in this repo |
 | `tests/Chief.Bridge.Tests/` | xunit tests for the bridge's outbox reader, frame handling, config, CLI, inbox watcher, webhook poller (against a local HTTP listener) and auto-ack |
 | `agents/chief.md` | Relay instructions for the chief agent: watch loops, replying, protocol, authority, trust |
-| `web/muse/` | Primary Muse browser client |
+| `web/muse/` | Primary Muse browser client (read-only room board included) |
+| `boards/` | Room boards, one `boards/<sha256(channel)>.jsonl` per room. Muse reads the joined channel's file after Connect and does not write it. |
 | `docs/protocol.md` | Wire protocol |
 | `docs/security.md` | Trust model: trips, pass handling, what needs a human |
 | `docs/index.html` | Landing page (GitHub Pages root) |
