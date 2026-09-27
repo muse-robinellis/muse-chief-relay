@@ -4,7 +4,39 @@ Merged work, newest first. Times are ET.
 
 ## Unreleased
 
-- **#11 Muse: masked password field for trips, and no default channel** (open). Both `docs/muse/` and
+- **Chief responsiveness: bridge auto-ack, `watch --settle`, listener status** (open). chief only acts
+  when a background `watch --wait` exits and wakes it, so every reply costs a full wake (about a minute),
+  and a missed re-arm goes unnoticed. On 2026-09-27 a listener exited and wasn't re-armed, and Alex's
+  hello and a task sat for several minutes until he asked. This doesn't make chief think faster. It makes
+  the wait visible and harder to lose.
+  - **Auto-acknowledgement** (`auto_ack` in `config.json`, off by default). When a trusted trip addresses
+    the bridge, the bridge itself posts `(auto) got it, thinking… full reply in about a minute`, or
+    `(auto) got task <id>, …` for a task, in well under a second (about 0.16 s in the live test).
+    `mention_trips` (people) trigger it with a mention or a task. `task_trips` (agents such as Fuse) trigger it
+    only with a task addressed to the bridge, never with plain chat, so there's no bot loop. It never fires for
+    the bridge's own nick or trip, untripped senders, or unlisted trips. There's a global `cooldown_s`
+    (default 60, minimum 10) and `max_per_hour` (default 20). When the watch status says no listener is
+    armed, it sends `offline_text` instead (`…chief's listener isn't armed right now, so the reply may be
+    late`). It's plain chat, not a protocol `ack`, so task state and the status view are unchanged. Sent
+    rows are logged with `"auto":"ack"`; held-back ones as `note` rows.
+  - **`watch --wait --settle <s>`** (0–60 s, off by default). After the first chat, `watch` keeps collecting
+    until the burst has been quiet for `<s>` seconds (capped at 4 × `<s>`), so "hello" plus a question comes
+    back as one wake instead of two. Chats already in hand are delivered even if the timeout or a signal
+    lands during the window. `agents/chief.md` now uses `--settle 3`.
+  - **Watch status file** `<offset file>.status`: `armed`/`settling` with a 5 s heartbeat, then `delivered`,
+    `timed_out`, `stopped` or `polled`, plus pid, deadline, exit code and count. Written atomically.
+    `--wait` warns if another live watcher is armed on the same offset file. A timeout now also prints
+    `re-arm now` on stderr.
+  - **`status`** (and so `hc status`) prints `listener: armed | waking | NOT ARMED | unknown` with the
+    reason: dead pid, stale heartbeat, or how long ago the last watch exited. It also prints how many chats
+    are waiting past the saved offset (read-only) and whether auto-ack is on. New `status --state <file>`.
+    Unknown arguments to `status` are now a usage error.
+  - Docs: README (auto-ack config table, listener table, `--settle`, status file), `agents/chief.md` (settle,
+    "exit 3 is a wake too", checking the listener, what the auto-ack means for chief), `docs/protocol.md`
+    (`(auto)` lines are receipts, not protocol acks), `docs/security.md` (how auto-ack uses trips; also fixes
+    the garbled "Fuse is alex confirmed…" sentence), `config.example.json` (disabled `auto_ack` block).
+  - 85 new tests (167 total).
+- **#11 Muse: masked password field for trips, and no default channel** (merged 2026-09-27 04:37). Both `docs/muse/` and
   `web/muse/` (kept identical).
   - New optional **Password (optional, for a trip)** field (`type="password"`,
     `autocomplete="current-password"`). On join the client sends `nick#password` only when a password
@@ -27,7 +59,7 @@ Merged work, newest first. Times are ET.
     screen as raw JSON. Any other unrecognised frame is shown with `token`/`pass`/`password` redacted.
   - README and `docs/security.md` document how to get a trip, what happens to the password, and the
     limits (hack.chat ignores anything after a second `#` in the password).
-- **#9 Inbox watcher: `Chief.Bridge watch`** (open, stacked on #8). Adapted from Fuse's original patch
+- **#9 Inbox watcher: `Chief.Bridge watch`** (landed on main via #10, merged 2026-09-26 22:53). Adapted from Fuse's original patch
   (`tools/watch_inbox.sh`) as a C# subcommand, so the bridge side stays on the .NET solution. It prints
   new inbound chats from `inbox.jsonl` as a JSON array of `{nick, trip, text, ts}`, skips the bridge's own
   nick, and keeps an offset file (default `<base>/.inbox_watch.offset`). The first run bootstraps silently
@@ -42,7 +74,7 @@ Merged work, newest first. Times are ET.
   loop (polling and `--wait` variants, using `Chief.Bridge watch`), replying via the outbox or `say`, no
   bot loops with Fuse, the protocol summary, what needs Alex, and the trust rules (Fuse's `!EtBBNv` is
   retired; Fuse is untripped until Alex confirms a new trip).
-- **#8 Removed: legacy Python bridge** (open, stacked on #7). Deleted `legacy/python/`, which held `bridge.py`,
+- **#8 Removed: legacy Python bridge** (landed on main via #10, merged 2026-09-26 22:53). Deleted `legacy/python/`, which held `bridge.py`,
   `bin/hc`, `parse_msg.py`, `test_pump.py`, `requirements.txt` and its README. Also deleted the root
   `relay_poll.py`, the operator poller for the old Python setup (it hard-coded `/workspace/hackchat`).
   Removed the matching `.gitignore` entries and all doc and landing-page references. Chief.Bridge is the

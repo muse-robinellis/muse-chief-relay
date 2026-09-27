@@ -74,6 +74,8 @@ Runtime files (`inbox.jsonl`, `outbox.jsonl`, `unread.jsonl`, `state.json`) live
 - **Outbox.** The bridge sends only complete, newline-terminated lines. A line still being written waits for its newline. The read position moves past a line only after its send succeeds. If a send fails, the session ends and the line is sent again after the reconnect. The position lives in memory for the life of the process. Lines already in `outbox.jsonl` when the bridge starts are **not** replayed, and neither are lines left unsent when it stops. A line whose send was cut off at the exact moment of a drop can, in principle, arrive twice.
 - **Shutdown.** SIGTERM or Ctrl+C (SIGINT) closes the socket, writes `state.json` with `alive: false`, and logs `[chief] stopped`. A second signal isn't intercepted, so the runtime's default handling ends the process if shutdown ever hangs.
 - **`state.json`** holds `alive`, `connected`, `reconnecting`, `at` (unix seconds), `channel`, `nick` and `pid`. It is written atomically (temp file, then rename). `status` reports whether that pid is still running. If the file says `alive: true` but the pid is gone, `status` calls the state stale.
+- **`status`** also prints whether a `watch` listener is armed, how many chats are waiting for one, and whether auto-ack is on. See "Is a listener armed?" below. `status --state <offset file>` checks a watcher that uses a non-default offset file. Any other argument is now a usage error (exit 2); before, extra arguments were ignored.
+- **Auto-ack** (optional, off by default): an instant `(auto) got it…` line when a trusted trip addresses the bridge. See "Auto-acknowledgement" below.
 - **Logs.** `inbox.jsonl` records every frame in and out. Frames that aren't JSON objects are logged as `{"raw": "..."}` and otherwise ignored. The join is logged without the pass. Any outbound `pass` field and the `token` in hack.chat's `session` frame are logged as `<redacted>`. JSON is written with a relaxed encoder, so `'` and non-ASCII text stay readable, for example `café ✓ 日本`.
 
 Unit tests: `dotnet test MuseChiefRelay.sln` (xunit, `tests/Chief.Bridge.Tests`).
@@ -94,10 +96,64 @@ Chief.Bridge watch --config /path/to/config.json --wait --timeout 1800   # block
 - **First run** only records the offset and prints `[]`, so history never floods the first poll. A missing inbox prints `[]`, and once it appears, everything in it counts as new.
 - **Truncated or rotated inbox:** if the file is shorter than the offset, or its first bytes changed, the offset goes back to 0 and the new contents are reported.
 - **Order:** the array is printed before the offset is saved. A crash in between repeats a message instead of losing it.
-- **`--wait`** blocks until at least one new chat qualifies. It wakes on file-system events and polls every second as a fallback. Then it prints the array and exits 0. With `--timeout <seconds>` (0 to 922337203685) it gives up, prints `[]` and exits **3**. On SIGTERM or SIGINT it prints `[]` and exits 143 or 130. Usage and config errors exit 2.
+- **`--wait`** blocks until at least one new chat qualifies. It wakes on file-system events and polls every second as a fallback. Then it prints the array and exits 0. With `--timeout <seconds>` (0 to 922337203685) it gives up, prints `[]`, prints `[chief] watch timed out with nothing new: re-arm now (watch --wait)` on stderr, and exits **3**. On SIGTERM or SIGINT it prints `[]` and exits 143 or 130. Usage and config errors exit 2.
+- **`--settle <seconds>`** (with `--wait`, 0 to 60, default 0 = off) makes one wake cover a burst. After the first qualifying chat, `watch` keeps collecting until `<seconds>` pass with no new one, or 4 × `<seconds>` after the first, whichever comes first. Then it prints everything as one array. A chat already in hand is always delivered, even if the timeout or a signal lands during the window. `agents/chief.md` uses `--settle 3`.
+- **Status file:** every run writes `<offset file>.status` (default `<base>/.inbox_watch.offset.status`, covered by the existing `.inbox_watch.offset*` gitignore rule). It holds `pid`, `state` (`armed`, `settling`, `delivered`, `timed_out`, `stopped`, or `polled` for a run without `--wait`), `armed_at`, `heartbeat_at` (refreshed every 5 s while armed), `deadline`, `exited_at`, `exit_code`, `delivered` and `settle_s`. It's written atomically and only feeds `status` and the auto-ack text; nothing reads it to decide what to deliver. `--wait` warns on stderr if another live watcher is already armed on the same offset file.
 - **Two ways to run it.** A scheduler can poll `watch` every few seconds. An agent that is woken when a background command finishes can run `watch --wait` in the background, handle the output when it exits, and start it again. Messages that arrive in between are waiting for the next run. [`agents/chief.md`](agents/chief.md) spells out both loops.
 - **Replying:** use `say` (`Chief.Bridge say --config <path> <text>`), or append `{"cmd":"chat","text":"..."}` lines to `outbox.jsonl`.
-- `watch` only reads `inbox.jsonl` (and writes its own offset file), so it's safe to run next to a live bridge.
+- `watch` only reads `inbox.jsonl` (and writes its own offset and status files), so it's safe to run next to a live bridge.
+
+### Is a listener armed?
+
+An agent that runs `watch --wait` and re-arms it after every exit is only listening while a watcher is actually running. If one exit doesn't get a re-arm, messages pile up in the inbox and nobody notices. `status` makes that visible:
+
+```
+listener: armed (pid 386538, armed, armed 2s ago, heartbeat 2s ago, times out in 4m)
+listener: waking: last watch delivered 2 chat(s) (exit 0) 0s ago; the agent should re-arm shortly
+listener: NOT ARMED: last watch was stopped by a signal (exit 143) 9s ago and nothing has re-armed it
+waiting: 1 chat(s) not yet delivered to a watcher (oldest from Alex at 05:00:04)
+auto-ack: on (mentions+tasks from 1 trip(s), tasks only from 1, cooldown 60s, max 20/h)
+```
+
+| Listener | When |
+|---|---|
+| `armed` | The status says `armed` or `settling`, its pid is running, and the heartbeat is under 30 s old |
+| `waking` | The last watch exited cleanly (delivered, timed out, or a one-shot poll) within the last 3 minutes, so the agent was just woken and should re-arm |
+| `NOT ARMED` | The last watch exited more than 3 minutes ago, was stopped by a signal, or says `armed` but its pid is gone or its heartbeat is stale |
+| `unknown` | No status file: no watcher from this build has run with that offset file |
+
+`waiting` counts chats past the saved offset, i.e. what the next `watch` would return. It's read-only: `status` never moves the offset.
+
+### Auto-acknowledgement
+
+The agent behind the bridge may only act when it's woken, which can take a minute. The bridge can cover that gap by answering straight away when a **trusted trip** addresses it. Off unless you enable it:
+
+```json
+"auto_ack": {
+  "enabled": true,
+  "mention_trips": ["Ab12Cd"],
+  "task_trips": ["Xy34Zw"],
+  "cooldown_s": 60
+}
+```
+
+| Field | Default | Meaning |
+|---|---|---|
+| `enabled` | `false` | Turn it on |
+| `mention_trips` | `[]` | Trips (people) whose messages get an ack when they name the bridge's nick or give it a task. A leading `!` is dropped. |
+| `task_trips` | `[]` | Trips (other agents) whose messages get an ack **only** for a task addressed to the bridge. Their plain chat never does, so agent chatter can't start a loop. |
+| `cooldown_s` | `60` | At most one ack per this many seconds, across all senders. Minimum 10. |
+| `max_per_hour` | `20` | At most this many acks in any rolling hour |
+| `text` | `(auto) got it, thinking… full reply in about a minute` | For a mention. `{from}` is replaced by the sender's nick. |
+| `task_text` | `(auto) got task {id}, thinking… full reply in about a minute` | For a task. `{id}` is the task id (or `?`). |
+| `offline_text` | `(auto) got it, but chief's listener isn't armed right now, so the reply may be late` | Sent instead when the watch status says **NOT ARMED**, so the ack never promises a reply nothing will produce. `armed`, `waking` and `unknown` get the normal text. |
+| `watch_state` | `.inbox_watch.offset` | Offset file of the watcher to check (relative to `base`). Its `.status` file is read. |
+
+- **Addressed** means the nick as a whole word, case-insensitive (`chief`, `@chief`, `chief's`, but not `chiefly` or `Chief.Bridge`), a JSON task with `"to"` equal to the nick, or `TASK to <nick>: …`. Other protocol lines (`ack`, `result`, `opinion`, `ping`, tasks for someone else) never count, even if they mention the nick.
+- **Never** for the bridge's own nick (any case), its own trip (learned from `onlineSet`), untripped senders, or trips on neither list. Nicks aren't identity.
+- The ack is plain chat, **not** a protocol `ack`: it doesn't change task state or the status view. It's sent through the same socket as the outbox, ahead of queued outbox lines, within about a second, and only while the join is confirmed. It's best effort: if a send fails, the ack is dropped, not retried after the reconnect.
+- It's logged in `inbox.jsonl` as an `out` row with `"auto":"ack"`. A trusted, addressed message that was held back by the cooldown or the hourly cap is logged as `{"dir":"note","msg":{"auto_ack":"suppressed","reason":"cooldown","to":"<nick>"}}`.
+- Enabling it with both trip lists empty, `cooldown_s` under 10, `max_per_hour` under 1, or an empty or over-300-character text is a config error (exit 2), for every command that loads the config.
 
 ## Configuration (`config.json`)
 
@@ -111,6 +167,7 @@ Copy `config.example.json` to `config.json`. `config.json` is gitignored. Keep i
 | `nick` | bridge | Nick for the bridge, e.g. `chief` |
 | `pass` | bridge | Optional hack.chat password. It gives the nick a **tripcode**. It is sent only in the join frame and is never written to logs. |
 | `base` | bridge | Directory for runtime files. Default: the config file's directory. |
+| `auto_ack` | bridge | Optional instant acknowledgement for trusted trips. Off by default. See "Auto-acknowledgement". |
 | `publish_repos` | `tools/status.py` | Allowlist of `owner/name` repos whose tasks can appear in the status view. Default: this repo. Compared case-insensitively. |
 | `publish_trips` | `tools/status.py` | Tripcodes allowed to publish. Every task, ack and result must carry one, **including the bridge's own**. An empty or missing list publishes nothing. |
 
@@ -189,7 +246,7 @@ Examples (send as the **entire** chat message text):
 | Path | Role |
 |------|------|
 | `src/Chief.Bridge/` | The desktop WSS bridge (.NET 8); the only bridge in this repo |
-| `tests/Chief.Bridge.Tests/` | xunit tests for the bridge's outbox reader, frame handling, config, CLI and inbox watcher |
+| `tests/Chief.Bridge.Tests/` | xunit tests for the bridge's outbox reader, frame handling, config, CLI, inbox watcher, watch status and auto-ack |
 | `agents/chief.md` | Relay instructions for the chief agent: watch loops, replying, protocol, authority, trust |
 | `web/muse/` | Primary Muse browser client |
 | `docs/protocol.md` | Wire protocol |

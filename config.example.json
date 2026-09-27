@@ -8,5 +8,11 @@
   "publish_repos": [
     "signalnotnoise/muse-chief-relay"
   ],
-  "publish_trips": []
+  "publish_trips": [],
+  "auto_ack": {
+    "enabled": false,
+    "mention_trips": [],
+    "task_trips": [],
+    "cooldown_s": 60
+  }
 }
