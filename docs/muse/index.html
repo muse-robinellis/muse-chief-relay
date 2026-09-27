@@ -21,12 +21,20 @@
       <form id="join-form">
         <label>
           Channel
-          <input id="channel" type="text" value="fuse-grok-6f4e970cd8" autocomplete="off" spellcheck="false" />
+          <input id="channel" type="text" placeholder="your-channel-name" autocomplete="off" spellcheck="false" aria-required="true" aria-describedby="channel-error" />
         </label>
+        <p id="channel-error" class="field-error hidden" role="alert">Enter a channel name. Use the same one as Chief (the <code>channel</code> in its <code>config.json</code>).</p>
         <label>
           Nick
           <input id="nick" type="text" value="Muse" autocomplete="off" spellcheck="false" />
         </label>
+        <!-- No name attribute on purpose: even if the script fails to load and the
+             browser submits the form natively, the password can't end up in the URL. -->
+        <label>
+          Password (optional, for a trip)
+          <input id="password" type="password" autocomplete="current-password" spellcheck="false" aria-describedby="password-hint" />
+        </label>
+        <p id="password-hint" class="field-hint">Gives your nick a tripcode so others can tell it's really you. Sent to hack.chat only in the join, never shown, logged or saved by this page. hack.chat ignores anything after a <code>#</code> in the password.</p>
         <button type="submit">Connect</button>
       </form>
       <p class="hint">Uses <code>wss://hack.chat/chat-ws</code>. Works from <code>file://</code> or any static host.</p>
@@ -39,6 +47,7 @@
         <div class="meta">
           <div><span class="k">channel</span> <span id="meta-channel">—</span></div>
           <div><span class="k">you</span> <span id="meta-nick">—</span></div>
+          <div><span class="k">trip</span> <span id="meta-trip">—</span></div>
         </div>
         <button id="disconnect" type="button" class="ghost">Disconnect</button>
       </aside>
