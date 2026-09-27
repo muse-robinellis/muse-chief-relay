@@ -4,6 +4,29 @@ Merged work, newest first. Times are ET.
 
 ## Unreleased
 
+- **Muse: masked password field for trips, and no default channel** (open). Both `docs/muse/` and
+  `web/muse/` (kept identical).
+  - New optional **Password (optional, for a trip)** field (`type="password"`,
+    `autocomplete="current-password"`). On join the client sends `nick#password` only when a password
+    is set, and shows your own trip once `onlineSet` reports it (`joined as alex !Ab12Cd`, plus a *trip*
+    line in the sidebar; `(no trip)` otherwise).
+  - The password is never displayed, logged, stored (`localStorage`/`sessionStorage`/cookies) or put in
+    the URL. The field is cleared on Connect; the password lives in one closure variable so automatic
+    rejoins (backoff, tab visible, back online) keep the same trip. Disconnect, a permanently rejected
+    join, or closing the tab forgets it.
+  - A legacy `name#password` typed into the Nick box moves everything after the `#` into the masked field
+    as you type; at submit, any leftover `name#password` is split and the Nick box reset to the name.
+    Only the name is echoed. Before, the password was visible while typing and echoed back in
+    `joining #… as name#password`.
+  - The channel field no longer defaults to the deployment's channel. It starts empty (placeholder
+    `your-channel-name`), and a blank Connect is refused with a message under the field. The client
+    doesn't remember the channel or write it to the URL (it never did either). The real channel name was
+    also removed from the README, `docs/protocol.md` and `agents/chief.md`.
+  - hack.chat's `session` frame is no longer dumped into the transcript. It carries a resumable session
+    token that restores your nick **and trip** without the password, and the client used to print it on
+    screen as raw JSON. Any other unrecognised frame is shown with `token`/`pass`/`password` redacted.
+  - README and `docs/security.md` document how to get a trip, what happens to the password, and the
+    limits (hack.chat ignores anything after a second `#` in the password).
 - **#9 Inbox watcher: `Chief.Bridge watch`** (open, stacked on #8). Adapted from Fuse's original patch
   (`tools/watch_inbox.sh`) as a C# subcommand, so the bridge side stays on the .NET solution. It prints
   new inbound chats from `inbox.jsonl` as a JSON array of `{nick, trip, text, ts}`, skips the bridge's own

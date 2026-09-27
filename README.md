@@ -120,7 +120,7 @@ hack.chat derives a short tripcode (e.g. `Ab12Cd`) from the password you join wi
 
 - Give the bridge a trip by setting `pass`. Treat the pass like a password: keep it out of chat, logs, commits and screenshots.
 - Put the bridge's own trip in `publish_trips`, or its acks and results won't count.
-- The Muse web client does not send a password yet, so its messages carry no trip. They won't count for publishing, and operators who gate commands on trips will treat them as chat.
+- Give Muse a trip by filling in the client's optional **Password** field when you join (details below). Without it, Muse's messages carry no trip: they won't count for publishing, and operators who gate commands on trips will treat them as chat.
 
 ## Status view and fail-closed publishing
 
@@ -143,7 +143,25 @@ No build step. Open the static client:
 - Double-click / open `web/muse/index.html` in a browser, **or**
 - Serve the folder: `python3 -m http.server 8080 --directory web/muse` then visit `http://localhost:8080/`
 
-Join with the same channel as Chief (default in the form: `fuse-grok-6f4e970cd8`, nick `Muse`). hack.chat WSS works from `file://` and any static HTTPS host. The same client is published at `docs/muse/`. Keep `web/muse/` and `docs/muse/` identical.
+Type the same channel as Chief (the `channel` in its `config.json`; examples here use `your-channel-name`). The Channel box starts empty and Connect refuses a blank one with a message under the field. The client has no built-in channel, doesn't remember one between visits and never puts it in the URL, because anyone who knows a channel name can read it. The nick defaults to `Muse`. hack.chat WSS works from `file://` and any static HTTPS host. The same client is published at `docs/muse/`. Keep `web/muse/` and `docs/muse/` identical.
+
+### Getting a trip in Muse (optional password)
+
+1. On the join screen, fill in **Channel**, **Nick** (e.g. `alex`) and **Password (optional, for a trip)**. Pick a password you don't use anywhere else and leave `#` out of it (hack.chat ignores everything after a second `#`).
+2. Press **Connect**. Once hack.chat confirms the join, the transcript shows `joined as alex !Ab12Cd` and the sidebar shows the trip under *trip*. Without a password you'll see `joined as alex (no trip)`.
+3. Tell Chief's operator that trip (out-of-band, not just in the channel) so it can go on the trusted list. The same password always gives the same trip, from any browser.
+
+What happens to the password:
+
+- It's sent to hack.chat once per join, inside the join frame as `name#password` (hack.chat's own trip syntax), and nowhere else.
+- It is **never shown**: the field is masked and emptied as soon as you press Connect, and every echo (join line, sidebar, online list) shows only the name.
+- It is **never logged or stored**: no console output, no `localStorage`/`sessionStorage`/cookies, nothing in the URL.
+- It stays in memory in a single JS variable for the life of the tab, so an automatic rejoin (dropped socket, tab back in view, network back) keeps the same trip. **Disconnect**, a permanently rejected join, or closing/reloading the tab forgets it; after that you type it again.
+- Old habit, `alex#password` in the Nick box? That still works. As soon as you type the `#`, the rest moves into the masked Password field. Only `alex` is ever displayed.
+- hack.chat's session token (which can restore your trip without the password) is never shown either.
+- Your browser's password manager may offer to save it. That's your call and your browser's storage, not the page's.
+
+Full details and limits: [docs/security.md](docs/security.md#muse-web-client-password-handling).
 
 <!-- MUSE-SIDE SECTION: written by Fuse (usage, reconnect behavior, rejected joins). -->
 Reconnect in brief: if the socket drops, the client retries with exponential backoff (1 s doubling to a 30 s cap, ±20% jitter). It retries immediately when the tab becomes visible again or the browser comes back online. If hack.chat rejects the join, the client never sits "connected" outside the channel. A nick-taken or rate-limit rejection is retried: indefinitely after a successful join, since the taken nick is usually your own stale session, but at most 3 times on the very first join. Any other rejection shows "join rejected" and stops.

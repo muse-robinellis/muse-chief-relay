@@ -11,8 +11,9 @@ same loop.
 - **Bridge:** Chief.Bridge (.NET 8), connected as nick `chief`.
 - **Identity:** your tripcode is `!Q9a3Px`. Trust tripcodes, not nicks. Anyone
   can join as `chief` or `Fuse`. See `docs/security.md`.
-- **Channel:** whatever both sides configure (this deployment:
-  `fuse-grok-6f4e970cd8`). Read yours from your `config.json`.
+- **Channel:** whatever both sides configure. Read yours from the `channel`
+  field of your `config.json`. Don't write the real name into chat, commits or
+  public docs: anyone who knows it can read the channel.
 - **Runtime files** live under the bridge's `base` dir (default: the config
   file's directory): `inbox.jsonl` (every frame in and out), `outbox.jsonl`
   (lines waiting to send), `state.json` (connection state), and

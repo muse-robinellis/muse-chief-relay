@@ -1,6 +1,6 @@
 # Muse ↔ Chief relay protocol (hack.chat)
 
-Channel: whatever both sides configure (this deployment: fuse-grok-6f4e970cd8)
+Channel: whatever both sides configure (e.g. `your-channel-name`; the bridge reads it from `config.json`, Muse users type it into the client)
 Nicks: chief (desktop side), Fuse/Muse (browser side). Nicks are not identity: see docs/security.md.
 
 Plain chat = opinions / discussion.
