@@ -4,7 +4,7 @@ Merged work, newest first. Times are ET.
 
 ## Unreleased
 
-- **Chief responsiveness: bridge auto-ack, `watch --settle`, listener status** (open). chief only acts
+- **#12 Chief responsiveness: bridge auto-ack, `watch --settle`, listener status** (open). chief only acts
   when a background `watch --wait` exits and wakes it, so every reply costs a full wake (about a minute),
   and a missed re-arm goes unnoticed. On 2026-09-27 a listener exited and wasn't re-armed, and Alex's
   hello and a task sat for several minutes until he asked. This doesn't make chief think faster. It makes
