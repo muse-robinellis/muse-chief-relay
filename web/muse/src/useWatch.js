@@ -1,22 +1,23 @@
 import { nextTick, onBeforeUnmount, onMounted, ref } from "vue";
 import { onSocketClose } from "./reconnect.js";
 import { isNearBottom } from "./scroll.js";
+import { resolveWatchChannel } from "./watchChannel.js";
+import { onWatchFrame } from "./watchSession.js";
 import { parseEnvelope, nickStyle, roleOf, spectatorNick } from "./watchFormat.js";
 
 const WS_URL = "wss://hack.chat/chat-ws";
-// The channel is never committed in source. It is resolved at runtime from
-// the `channel` query param (e.g. muse/?channel=name#/watch) or, at build
-// time, from the VITE_RELAY_CHANNEL env var. Unset -> the view renders a
-// "stream not configured" notice instead of joining anything.
+// Public room by default so /muse/#/watch needs no ?channel= and no build env.
+// ?channel= wins, then VITE_RELAY_CHANNEL, then that one committed channel.
+// Do not extend the default without Alex's say-so.
 function resolveChannel() {
+  let search = "";
   try {
-    const q = new URLSearchParams(window.location.search).get("channel");
-    if (q && q.trim()) return q.trim();
+    search = window.location.search;
   } catch {
     /* ignore */
   }
   const env = import.meta.env && import.meta.env.VITE_RELAY_CHANNEL;
-  return (env || "").trim();
+  return resolveWatchChannel(search, env);
 }
 const CHANNEL = resolveChannel();
 const BACKOFF_BASE_MS = 1000;
@@ -43,9 +44,10 @@ export function useWatch() {
   const unseen = ref(0);
   const transcriptEl = ref(null);
 
-  const nick = spectatorNick();
+  let nick = spectatorNick();
   const trips = new Map();
   let ws = null;
+  let joined = false;
   let wantConnected = false;
   let retryAttempt = 0;
   let retryTimer = null;
@@ -189,6 +191,7 @@ export function useWatch() {
   function openSocket() {
     clearRetry();
     dropSocket();
+    joined = false;
     if (!CHANNEL) {
       setStatus("stream not configured", false);
       pushSys("no channel configured — add ?channel=<name> to the page URL");
@@ -199,8 +202,8 @@ export function useWatch() {
     ws = sock;
     sock.onopen = () => {
       if (sock !== ws) return;
-      setStatus("live", true);
-      retryAttempt = 0;
+      joined = false;
+      setStatus("joining…", false);
       sock.send(JSON.stringify({ cmd: "join", channel: CHANNEL, nick }));
     };
     sock.onmessage = (ev) => {
@@ -211,7 +214,18 @@ export function useWatch() {
       } catch {
         return;
       }
+      const decision = onWatchFrame(data, joined);
+      if (decision.action === "joined") {
+        joined = true;
+        retryAttempt = 0;
+        setStatus("live", true);
+      }
       handleMessage(data);
+      if (decision.action === "retry") {
+        if (decision.rotateNick) nick = spectatorNick();
+        dropSocket();
+        scheduleReconnect();
+      }
     };
     sock.onerror = () => {
       if (sock !== ws) return;
@@ -220,6 +234,7 @@ export function useWatch() {
     sock.onclose = () => {
       if (sock !== ws) return;
       ws = null;
+      joined = false;
       if (onSocketClose(wantConnected) === "stop") {
         setStatus("disconnected", false);
         return;

@@ -1,13 +1,15 @@
 import { createApp, h, ref } from "vue";
 import App from "./App.vue";
 import WatchLive from "./WatchLive.vue";
+import { isWatchRoute } from "./watchRoute.js";
 import "./styles.css";
 
-// Tiny hash router. "#/watch" mounts the read-only live spectator view;
-// anything else mounts the interactive client. The hash is only ever read,
-// never written, and switching views unmounts the previous root cleanly.
+// Tiny hash router. Exactly "#/watch" (or "#/watch/") mounts the read-only
+// live spectator view; anything else, including "#/watchdog", mounts the
+// interactive client. The hash is only ever read, never written, and
+// switching views unmounts the previous root cleanly.
 function pick() {
-  return window.location.hash.startsWith("#/watch") ? WatchLive : App;
+  return isWatchRoute(window.location.hash) ? WatchLive : App;
 }
 
 const current = ref(pick());

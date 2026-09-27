@@ -67,17 +67,26 @@ Limits you should know about:
 
 ## Channel names
 
-The channel name is the only thing keeping a hack.chat channel private. The Muse client has no
-default channel and doesn't remember one: you type it each time, and it isn't put in the URL,
-`localStorage`, `sessionStorage`, the console, or the page title. Keep real channel names out of
-public pages, examples, issues and screenshots, and use a placeholder like `your-channel-name`.
+The channel name is the only thing keeping a hack.chat channel private. The interactive Muse
+client has no default channel and doesn't remember one: you type it each time, and it isn't put
+in the URL, `localStorage`, `sessionStorage`, the console, or the page title. Keep private
+channel names out of public pages, examples, issues and screenshots, and use a placeholder like
+`your-channel-name`.
 
-Board filenames are the SHA-256 of the channel, so the repo and Pages don't contain the name.
-A hash of a guessable name can be brute-forced, so pick a high-entropy channel. A name already
-published (git history, old PRs, old Pages builds) stays known, and rotating the channel is the
-only fix. The Vue client hashes the channel with Web Crypto after Connect and renders the board
-as text. A missing board, a failed fetch, or a page without `crypto.subtle` leaves the chat up.
-The channel and the hash are not written to the URL, storage, logged output, or the page title.
+One exception, and do not extend it without Alex's say-so: the read-only spectator page at
+`muse/#/watch` joins the public room `fuse-grok-6f4e970cd8` with nothing to configure. That name
+is public because every visitor's browser sends it. `?channel=` or `VITE_RELAY_CHANNEL` can point
+the same page at another room for that visit or that build, but no second channel name is
+committed. `tests/muse/board.test.js` skips only this preimage when it checks that no tracked
+token hashes to a board filename.
+
+Board filenames are the SHA-256 of the channel, so the repo and Pages don't contain private
+channel names. A hash of a guessable name can be brute-forced, so pick a high-entropy channel. A
+name already published (git history, old PRs, old Pages builds) stays known, and rotating the
+channel is the only fix. The Vue client hashes the channel with Web Crypto after Connect and
+renders the board as text. A missing board, a failed fetch, or a page without `crypto.subtle`
+leaves the chat up. The channel and the hash are not written to the URL, storage, logged output,
+or the page title.
 
 ## Knowledge graph
 
@@ -140,7 +149,7 @@ can wake the agent with text of their choice, so both are secrets:
 
 `knowledge/` is committed, so it is public. `chief-knowledge check` (and `rebuild`) exit 1 and write no index if a note is not `visibility: public` or if a file there looks like a bearer key, a password, a token, a session secret, or a trip password. Quoted JSON keys (`password` or `api_key` before a colon) and prefixed names (`my_password`) count as assignments. A word that only contains those letters, such as compass or bypass, does not. A `boards/<name>.jsonl` path is refused unless `<name>` is exactly 64 lowercase hex characters or the placeholder `<sha256(trimmed channel)>`. That is the same fail-closed idea as the status view: the safe path is the one that refuses.
 
-Notes that are not safe to publish do not get a "private" flag in this repo. They belong in a directory outside the checkout, and that directory is never copied back. A hack.chat channel name is not written into notes, docs, or commits. `source: room` means the decision was made in the channel without naming it. See `knowledge/README.md`.
+Notes that are not safe to publish do not get a "private" flag in this repo. They belong in a directory outside the checkout, and that directory is never copied back. A hack.chat channel name is not written into notes. `source: room` means the decision was made in the channel without naming it. The one channel name that is committed is the public watch room in "Channel names" above. See `knowledge/README.md`.
 
 ## What needs a human
 

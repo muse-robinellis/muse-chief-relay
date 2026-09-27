@@ -30,32 +30,92 @@ test("watch format helpers", async () => {
   assert.match(f.spectatorNick(), /^spectator-[a-z0-9]{4}$/);
 });
 
-test("watch route wiring", () => {
+test("watch route wiring", async () => {
+  const { isWatchRoute } = await import("../../web/muse/src/watchRoute.js");
+  assert.equal(isWatchRoute("#/watch"), true);
+  assert.equal(isWatchRoute("#/watch/"), true);
+  assert.equal(isWatchRoute("#/watchdog"), false);
+  assert.equal(isWatchRoute("#/watch-anything"), false);
+  assert.equal(isWatchRoute("#/Watch"), false);
+  assert.equal(isWatchRoute("#/"), false);
+  assert.equal(isWatchRoute(""), false);
+
   const main = fs.readFileSync(path.join(srcDir, "main.js"), "utf8");
-  assert.match(main, /#\/watch/);
+  assert.match(main, /isWatchRoute/);
   assert.match(main, /WatchLive/);
+  assert.doesNotMatch(main, /startsWith/);
   assert.doesNotMatch(main, /location\.hash\s*=/);
   assert.ok(fs.existsSync(path.join(srcDir, "WatchLive.vue")));
   assert.ok(fs.existsSync(path.join(srcDir, "useWatch.js")));
   assert.ok(fs.existsSync(path.join(srcDir, "watchFormat.js")));
 });
 
-test("watch view joins the relay channel as a read-only spectator", () => {
+test("watch view joins the public relay room as a read-only spectator", async () => {
+  const { PUBLIC_WATCH_CHANNEL, resolveWatchChannel } = await import("../../web/muse/src/watchChannel.js");
+  assert.equal(resolveWatchChannel("", ""), PUBLIC_WATCH_CHANNEL);
+  assert.equal(resolveWatchChannel("?", undefined), PUBLIC_WATCH_CHANNEL);
+  assert.equal(resolveWatchChannel("?channel=other-room", ""), "other-room");
+  assert.equal(resolveWatchChannel("?channel=%20room%20", "from-env"), "room");
+  assert.equal(resolveWatchChannel("", "  from-env  "), "from-env");
+  assert.equal(resolveWatchChannel("?channel=query", "from-env"), "query");
+
   const w = fs.readFileSync(path.join(srcDir, "useWatch.js"), "utf8");
-  // The channel is never committed in source: it resolves at runtime from the
-  // `channel` query param or the VITE_RELAY_CHANNEL build-time env var.
-  // (Asserted structurally so this test itself never contains the name.)
+  assert.match(w, /resolveWatchChannel/);
   assert.match(w, /VITE_RELAY_CHANNEL/);
   assert.match(w, /location\.search/);
-  assert.doesNotMatch(w, /const CHANNEL = "[^"]+"/);
   assert.match(w, /spectatorNick/);
   assert.doesNotMatch(w, /console\./);
+  const openBody = w.slice(w.indexOf("sock.onopen"), w.indexOf("sock.onmessage"));
+  assert.doesNotMatch(openBody, /setStatus\(\s*"live"/);
+  assert.match(w, /decision\.action === "joined"/);
+  assert.match(w, /setStatus\(\s*"live",\s*true\s*\)/);
+  assert.match(w, /decision\.action === "retry"/);
+  assert.match(w, /decision\.rotateNick/);
   const v = fs.readFileSync(path.join(srcDir, "WatchLive.vue"), "utf8");
   assert.match(v, /Two AI agents and a human/);
   assert.match(v, /TransitionGroup/);
+  const template = v.slice(v.indexOf("<template>"), v.indexOf("</template>"));
+  const root = template.match(/<div class="([^"]*)">/);
+  assert.ok(root, "watch root element");
+  assert.match(root[1], /\bh-full\b/);
+  assert.match(root[1], /\boverflow-y-auto\b/);
+  assert.doesNotMatch(root[1], /\bmin-h-dvh\b/);
 });
 
-test("the Pages build includes the watch-live view", () => {
+test("a pre-join warn is a rejected join; live only after onlineSet", async () => {
+  const { onWatchFrame } = await import("../../web/muse/src/watchSession.js");
+
+  const taken = onWatchFrame({ cmd: "warn", text: "Nickname taken" }, false);
+  assert.equal(taken.action, "retry");
+  assert.equal(taken.live, false);
+  assert.equal(taken.joined, false);
+  assert.equal(taken.rotateNick, true);
+
+  const rate = onWatchFrame({ cmd: "warn", text: "You are joining channels too fast. Wait a moment." }, false);
+  assert.equal(rate.action, "retry");
+  assert.equal(rate.live, false);
+  assert.equal(rate.rotateNick, false);
+
+  const info = onWatchFrame({ cmd: "info", text: "hello" }, false);
+  assert.equal(info.action, "stay");
+  assert.equal(info.live, false);
+
+  const joined = onWatchFrame({ cmd: "onlineSet", nicks: ["spectator-ab12"] }, false);
+  assert.equal(joined.action, "joined");
+  assert.equal(joined.live, true);
+  assert.equal(joined.joined, true);
+
+  const later = onWatchFrame({ cmd: "warn", text: "Nickname taken" }, true);
+  assert.equal(later.action, "stay");
+  assert.equal(later.live, true);
+  assert.equal(later.rotateNick, false);
+
+  const chat = onWatchFrame({ cmd: "chat", nick: "Fuse", text: "hi" }, true);
+  assert.equal(chat.action, "stay");
+  assert.equal(chat.live, true);
+});
+
+test("the Pages build includes the watch-live view", async () => {
   const index = path.join(published, "index.html");
   assert.ok(fs.existsSync(index), "docs/muse/index.html missing; run npm run build in web/muse");
   let text = "";
@@ -69,4 +129,7 @@ test("the Pages build includes the watch-live view", () => {
   walk(published);
   assert.match(text, /Two AI agents and a human/);
   assert.match(text, /#\/watch/);
+  const { PUBLIC_WATCH_CHANNEL } = await import("../../web/muse/src/watchChannel.js");
+  assert.match(text, new RegExp(PUBLIC_WATCH_CHANNEL));
+  assert.doesNotMatch(text, /startsWith\("#\/watch"\)|startsWith\('#\/watch'\)/);
 });

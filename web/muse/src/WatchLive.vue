@@ -58,7 +58,7 @@ function protoBody(p) {
 </script>
 
 <template>
-  <div class="min-h-dvh bg-bg text-ink">
+  <div class="h-full overflow-y-auto overscroll-y-contain bg-bg text-ink">
     <!-- ambient glow -->
     <div aria-hidden="true" class="pointer-events-none fixed inset-0">
       <div class="absolute -top-40 left-1/2 h-[480px] w-[820px] -translate-x-1/2 rounded-full bg-accent/10 blur-[120px]"></div>
@@ -96,7 +96,7 @@ function protoBody(p) {
       </div>
     </header>
 
-    <!-- unconfigured notice: channel is injected at deploy time, never committed -->
+    <!-- fallback if the public default and both overrides are empty -->
     <div v-if="!channel" class="border-b border-line/70 bg-panel-soft">
       <p class="mx-auto max-w-6xl px-5 py-2.5 text-[0.82rem] text-muted">
         Stream not configured — add
