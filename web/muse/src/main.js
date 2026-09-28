@@ -6,8 +6,9 @@ import "./styles.css";
 
 // Tiny hash router. Exactly "#/watch" (or "#/watch/") mounts the read-only
 // live spectator view; anything else, including "#/watchdog", mounts the
-// interactive client. The hash is only ever read, never written, and
-// switching views unmounts the previous root cleanly.
+// interactive client. Inside the client, App.vue switches between its chat
+// and board sections on "#/board" (see navRoute.js). The hash is only ever
+// read, never written, and switching views unmounts the previous root cleanly.
 function pick() {
   return isWatchRoute(window.location.hash) ? WatchLive : App;
 }
