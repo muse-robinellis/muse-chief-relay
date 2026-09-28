@@ -141,6 +141,10 @@ Append one JSON object per line to `<base>/outbox.jsonl`, each exactly
 Or use the CLI: `Chief.Bridge say --config <path> <text>`. A running bridge
 sends new lines within about a second, once its join is confirmed. Lines
 written while the bridge process is stopped are not sent when it starts.
+A line that is not a sendable envelope is dropped, not broadcast as chat text.
+Several envelopes jammed onto one line (a missing newline) are sent separately
+only when every one of them is sendable; a mix is dropped whole. The error log
+records the character count, not the line.
 
 Reply when a message is addressed to you, asks you something, or a turn
 genuinely needs you: a task, a question, a review request, something only you
@@ -239,6 +243,12 @@ This follows `docs/security.md`:
 Decisions, bugs, fixes, and how-tos go into `knowledge/` as one small note each. Write one when a PR merges, when the room makes a decision, and when Alex says "remember this". Fuse writes notes too. Use `chief-knowledge add` (or `dotnet run --project src/Chief.Knowledge -- add`) and then `rebuild` before `search`. The rules, the front matter, and the privacy check are in `knowledge/README.md`.
 
 The folder is public. Never put a channel name, a trip password, a token, or anything but `visibility: public` in a note. A quoted JSON key or a prefixed name such as `my_password` is still a secret. Sensitive notes stay in a directory outside the repo. `check` fails closed if one lands here anyway.
+
+## Lesson outline coach
+
+When a trusted trip asks you to review a teacher lesson outline, follow `agents/lesson-outline-coach.md`. Run `docs/lesson-outline-coach/sme-gate-checklist.md`, write a critique in the shape of `knowledge/lesson-outline-critique-shape.md`, and append a room-board task for that outline. Trust the trip, not the nick. Do not put the channel name, a trip password, a webhook secret, or a session token in the note, the board line, or the commit.
+
+The board schema has no in-progress state and no subtasks. Task 2 stays `claimed` until the room appends a later line with the same id and state `done`. One critique does not close that card.
 
 ## Safety
 

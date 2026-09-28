@@ -83,12 +83,12 @@ Runtime files (`inbox.jsonl`, `outbox.jsonl`, `unread.jsonl`, `state.json`) live
 - **Join.** After connecting, the bridge sends `join` and waits for hack.chat's `onlineSet`. Only then does `state.json` say `connected: true`, and only then does it start sending outbox lines. A `warn` before `onlineSet` (for example `Nickname taken`) counts as a rejected join. So does no `onlineSet` within 15 s. Either way the bridge disconnects and retries.
 - **Reconnect.** The process does not stop because a connection failed. DNS errors, connection refused, TLS failures, a handshake that never finishes (abandoned after 20 s), a server close (including during the join), a join `warn` of any text, and a missed `onlineSet` are all retried until the process is stopped. The delay starts at 1 s and doubles to a 30 s cap, then a random factor between 0.8 and 1.2 is applied, and the wait is still never more than 30 s. It goes back to 1 s after any session that was confirmed by `onlineSet` or stayed up for 60 s. Each attempt is logged (attempt number, reason, whether the join was confirmed) with the trip password redacted. Each attempt also uses its own HTTP handler, so one bad handshake cannot stick the next one to a shared connection pool.
 - **What does stop the bridge.** A bad config exits immediately (exit code 2) instead of retrying: the config file is missing or isn't JSON, `channel` or `nick` is empty, `auto_ack` is enabled but invalid, or `url` is not an absolute `ws://` or `wss://` URI. Those cannot succeed on the next try. SIGINT / SIGTERM stops it cleanly (exit 0) after writing `state.json` with `alive: false`. A warn from the server, including one that says the nick is illegal, is **not** treated as a bad config: the same channel carries rate limits and transient kicks, and guessing which text is permanent is how a bridge gives up during an outage.
-- **Outbox.** The bridge sends only complete, newline-terminated lines. A line still being written waits for its newline. The read position moves past a line only after its send succeeds. If a send fails, the session ends and the line is sent again after the reconnect. The position lives in memory for the life of the process. Lines already in `outbox.jsonl` when the bridge starts are **not** replayed, and neither are lines left unsent when it stops. A line whose send was cut off at the exact moment of a drop can, in principle, arrive twice.
+- **Outbox.** The bridge sends only complete, newline-terminated lines. A line still being written waits for its newline. Each line must be one or more concatenated sendable JSON envelopes (an object with a string `cmd`, or an object with a string `text`, which becomes a chat). Plain text, a non-sendable value, truncated input, trailing garbage, or a mix of a sendable envelope with anything else is dropped and not sent. The read position moves past a line after its frames have been sent, or as soon as a dropped line is logged, so a bad line cannot wedge the pump. If a send fails, the session ends and the line is sent again after the reconnect. The position lives in memory for the life of the process. Lines already in `outbox.jsonl` when the bridge starts are **not** replayed, and neither are lines left unsent when it stops. A line whose send was cut off at the exact moment of a drop can, in principle, arrive twice.
 - **Shutdown.** SIGTERM or Ctrl+C (SIGINT) closes the socket, writes `state.json` with `alive: false`, and logs `[chief] stopped`. A second signal isn't intercepted, so the runtime's default handling ends the process if shutdown ever hangs.
 - **`state.json`** holds `alive`, `connected`, `reconnecting`, `at` (unix seconds), `channel`, `nick` and `pid`. It is written atomically (temp file, then rename). `status` reports whether that pid is still running. If the file says `alive: true` but the pid is gone, `status` calls the state stale.
 - **`status`** also prints the hook poller's state and its last fire (see "Webhook poller" below), how many chats `watch` hasn't drained yet (`undrained`, read-only; `--state <offset file>` for a non-default offset), and whether auto-ack is on. Any other argument is now a usage error (exit 2); before, extra arguments were ignored.
 - **Auto-ack** (optional, off by default): an instant `(auto) got it…` line when a trusted trip addresses the bridge. See "Auto-acknowledgement" below.
-- **Logs.** `inbox.jsonl` records every frame in and out. Frames that aren't JSON objects are logged as `{"raw": "..."}` and otherwise ignored. The join is logged without the pass. Any outbound `pass` field and the `token` in hack.chat's `session` frame are logged as `<redacted>`. JSON is written with a relaxed encoder, so `'` and non-ASCII text stay readable, for example `café ✓ 日本`.
+- **Logs.** `inbox.jsonl` records every frame in and out. Frames that aren't JSON objects are logged as `{"raw": "..."}` and otherwise ignored. The join is logged without the pass. Any outbound `pass` field and the `token` in hack.chat's `session` frame are logged as `<redacted>`. A dropped outbox line is logged by character count only, never as a preview of the line. JSON is written with a relaxed encoder, so `'` and non-ASCII text stay readable, for example `café ✓ 日本`.
 
 Unit tests: `dotnet test MuseChiefRelay.sln` (xunit, `tests/Chief.Bridge.Tests` and `tests/Chief.Knowledge.Tests`). Muse client tests: `node --test tests/muse/` (reconnect decisions, follow-tail scroll, the room-board reader, and a check that `docs/muse/` is the Vite build).
 
@@ -363,6 +363,23 @@ dotnet run --project src/Chief.Knowledge -- search "reconnect" --tag bridge
 
 Write a note on every merge, on every decision made in the room, and whenever Alex says "remember this". Both chief and Fuse write them. The folder is public: `check` fails closed on a private note or an obvious secret, including a JSON key or a prefixed name such as `my_password`, and a channel name does not belong in the repo. How to write one, and where sensitive notes go instead, is [knowledge/README.md](knowledge/README.md).
 
+## Lesson outline coach
+
+The first teaching-kit card. A teacher drops a lesson outline; the agent runs an SME-gate checklist a department chair would recognize, writes a critique note, and appends a room-board task. Alex made this kit build priority #1. Medical stays parked. 3D asset-QA stays a promo angle. See [knowledge/classroom-kit-priority.md](knowledge/classroom-kit-priority.md).
+
+| Step | Where |
+|---|---|
+| Playbook (trust, privacy, board update) | [agents/lesson-outline-coach.md](agents/lesson-outline-coach.md) |
+| Checklist | [docs/lesson-outline-coach/sme-gate-checklist.md](docs/lesson-outline-coach/sme-gate-checklist.md) |
+| Note template | [docs/lesson-outline-coach/critique-note.md](docs/lesson-outline-coach/critique-note.md) |
+| Indexed shape | [knowledge/lesson-outline-critique-shape.md](knowledge/lesson-outline-critique-shape.md) |
+
+The twelve gates are objectives, audience, prerequisites, assessment alignment, learning sequence, timing, materials, accessibility, differentiation, checks for understanding, closure, and risks and assumptions. Marks are `met`, `partial`, and `missing`. The verdict is `ready` (every gate met), `revise`, or `blocked`. There is no score and no validator command. The agent critiques the outline the teacher wrote. It does not author a replacement lesson.
+
+Critique notes use ordinary `chief-knowledge` front matter (`visibility: public`). They do not contain student names, grades, disability details, a channel name, a trip password, a webhook secret, or a session token. Trust the trip that asked, not the nick.
+
+Board task 2 is that product card, owner `chief`, state `claimed`. `boards/schema.json` has no in-progress state and no subtasks, so this change does not rewrite the hashed board file. `claimed` is the working state. Closing the card means appending a later line with the same id and state `done`, which waits until the room accepts the path. Each outline gets its own next task id. The playbook has the exact line to append, and the rule for leaving the board alone when you have no local channel config.
+
 ## Layout
 
 | Path | Role |
@@ -373,6 +390,8 @@ Write a note on every merge, on every decision made in the room, and whenever Al
 | `tests/Chief.Bridge.Tests/` | xunit tests for the bridge's outbox reader, frame handling, config, CLI, inbox watcher, webhook poller (against a local HTTP listener) and auto-ack |
 | `tests/Chief.Knowledge.Tests/` | xunit tests for note validation, the privacy guard, FTS, hybrid ranking, and supersedes |
 | `agents/chief.md` | Relay instructions for the chief agent: watch loops, replying, protocol, authority, trust |
+| `agents/lesson-outline-coach.md` | Playbook for the Lesson outline coach: checklist, critique note, board task |
+| `docs/lesson-outline-coach/` | SME-gate checklist and the critique-note template |
 | `web/muse/` | Muse client source (Vue 3 + Vite + Tailwind). `board.js` is the read-only board reader. `npm install`, `npm run dev`, `npm run build` |
 | `boards/` | Room boards, one `boards/<sha256(channel)>.jsonl` per room. Muse reads the joined channel's file after Connect and does not write it. |
 | `docs/protocol.md` | Wire protocol |
