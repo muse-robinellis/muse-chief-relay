@@ -39,11 +39,11 @@ function stateClass(state) {
 <template>
   <section
     id="room-board"
-    class="flex max-h-[min(22rem,42dvh)] min-h-0 shrink flex-col overflow-hidden rounded-xl border border-line bg-panel-soft px-5 py-4 shadow-[0_10px_40px_rgba(0,0,0,0.25)]"
+    class="flex min-h-0 flex-col overflow-hidden rounded-2xl border border-line bg-panel-soft px-5 py-4 shadow-[0_20px_60px_rgba(0,0,0,0.35)] sm:px-6 sm:py-5"
     aria-label="Room board"
   >
-    <div class="flex shrink-0 items-center gap-2.5">
-      <h2 class="m-0 flex-1 text-base font-semibold">Room board</h2>
+    <div class="flex shrink-0 flex-wrap items-center gap-2.5">
+      <h2 class="m-0 flex-1 text-[1.05rem] font-semibold text-ink">Room board</h2>
       <span
         v-show="view.statusText"
         id="board-status"
@@ -53,7 +53,7 @@ function stateClass(state) {
       <button
         id="board-reload"
         type="button"
-        class="cursor-pointer rounded-lg border border-line bg-transparent px-2.5 py-1 text-[0.8rem] font-medium text-muted disabled:cursor-not-allowed disabled:opacity-40"
+        class="cursor-pointer rounded-lg border border-line bg-panel px-2.5 py-1 text-[0.8rem] font-medium text-muted transition hover:text-ink hover:brightness-125 disabled:cursor-not-allowed disabled:opacity-40"
         :disabled="view.reloadDisabled"
         @click="$emit('reload')"
       >Reload</button>
@@ -71,7 +71,7 @@ function stateClass(state) {
             <article
               v-for="task in tasks"
               :key="task.id"
-              class="mb-2 grid gap-1 rounded-lg border border-line bg-panel-2 px-2.5 py-2"
+              class="mb-2.5 grid gap-1 rounded-xl border border-line bg-panel-2 px-3 py-2.5 transition-colors hover:border-focus"
             >
               <div class="flex items-center justify-between gap-2">
                 <span class="font-mono text-[0.78rem] text-muted">#{{ task.id }}</span>
@@ -90,7 +90,7 @@ function stateClass(state) {
             <article
               v-for="(item, index) in view.board.decisions"
               :key="'d' + index"
-              class="mb-2 grid gap-1 rounded-lg border border-line bg-panel-2 px-2.5 py-2"
+              class="mb-2.5 grid gap-1 rounded-xl border border-line bg-panel-2 px-3 py-2.5 transition-colors hover:border-focus"
             >
               <div class="text-[0.78rem] leading-snug text-muted break-words">{{ item.decider }} · {{ formatBoardTs(item.ts) }}</div>
               <div class="text-[0.92rem] leading-snug break-words">{{ item.decision }}</div>
@@ -103,7 +103,7 @@ function stateClass(state) {
             <article
               v-for="(item, index) in view.board.scratch"
               :key="'s' + index"
-              class="mb-2 grid gap-1 rounded-lg border border-line bg-panel-2 px-2.5 py-2"
+              class="mb-2.5 grid gap-1 rounded-xl border border-line bg-panel-2 px-3 py-2.5 transition-colors hover:border-focus"
             >
               <div class="text-[0.78rem] leading-snug text-muted break-words">{{ item.author }} · {{ formatBoardTs(item.ts) }}</div>
               <div class="text-[0.92rem] leading-snug break-words">{{ item.text }}</div>

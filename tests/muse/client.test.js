@@ -79,3 +79,61 @@ test("the Pages build is the Vite output, not a second copy of the old client", 
   assert.equal(fs.existsSync(path.join(published, "reconnect.js")), false);
   assert.doesNotMatch(text, /localStorage|sessionStorage/);
 });
+
+test("narrow sidebar never clips Disconnect and keeps the user list usable", () => {
+  const app = fs.readFileSync(appVue, "utf8");
+  // The old max-h-40 cap clipped the sidebar on phones, pushing Disconnect
+  // out of reach. The cap is gone entirely.
+  assert.doesNotMatch(app, /max-\[820px\]:max-h-/);
+  // On narrow widths the users list becomes a horizontal chip row instead of
+  // a crushed vertical list.
+  assert.match(app, /id="users"[^>]*max-\[820px\]:overflow-x-auto/);
+  // Disconnect is still a plain in-flow button after the list.
+  const disconnectAt = app.indexOf('id="disconnect"');
+  const usersAt = app.indexOf('id="users"');
+  assert.ok(disconnectAt > usersAt, "Disconnect must come after the users list");
+  assert.match(app.slice(disconnectAt, disconnectAt + 400), /focus-visible:/);
+});
+
+test("connected chat has an h1", () => {
+  const app = fs.readFileSync(appVue, "utf8");
+  const panel = app.slice(app.indexOf('id="chat-panel"'));
+  assert.match(panel, /<h1[^>]*>Relay chat<\/h1>/);
+});
+
+test("join-card footer uses text-muted, not low-contrast text-dim", () => {
+  const app = fs.readFileSync(appVue, "utf8");
+  const marker = app.indexOf("wss://hack.chat/chat-ws");
+  assert.ok(marker > 0);
+  const footer = app.slice(app.lastIndexOf("<p", marker), app.indexOf("</p>", marker));
+  assert.match(footer, /text-muted/);
+  assert.doesNotMatch(footer, /text-dim/);
+});
+
+test("new header, hero, and sidebar controls have focus-visible styles", () => {
+  const app = fs.readFileSync(appVue, "utf8");
+  const header = fs.readFileSync(path.join(srcDir, "SiteHeader.vue"), "utf8");
+  const tabs = header.slice(header.indexOf('v-for="t in tabs"'), header.indexOf("</nav>"));
+  assert.match(tabs, /focus-visible:outline-focus/);
+  const headerGithub = header.slice(header.indexOf('id="status"'));
+  assert.match(headerGithub, /focus-visible:outline-focus/);
+  const boardLink = app.slice(app.indexOf('href="#/board"'));
+  assert.match(boardLink.slice(0, 500), /focus-visible:outline-focus/);
+  const hero = app.slice(app.indexOf("Watch live →") - 400, app.indexOf("Watch live →"));
+  assert.match(hero, /focus-visible:outline-focus/);
+});
+
+test("board badge counts open or claimed tasks, matching its comment", () => {
+  const app = fs.readFileSync(appVue, "utf8");
+  const header = fs.readFileSync(path.join(srcDir, "SiteHeader.vue"), "utf8");
+  assert.match(app, /t\.state === "open" \|\| t\.state === "claimed"/);
+  assert.match(header, /open or claimed board tasks/);
+});
+
+test("sidebar board link hides on narrow widths (nothing board-like above phone chat)", () => {
+  const app = fs.readFileSync(appVue, "utf8");
+  const linkAt = app.indexOf("Room board →");
+  assert.ok(linkAt > 0, "sidebar board link still exists for desktop");
+  assert.match(app.slice(linkAt - 500, linkAt), /max-\[820px\]:hidden/);
+});
+

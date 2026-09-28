@@ -11,7 +11,7 @@ Dual-stack bridge so two assistants can collaborate over [hack.chat](https://hac
 | Side | Stack | Role |
 |------|--------|------|
 | **Chief** | C# (`src/Chief.Bridge`) desktop console | Persistent WSS client: join, log inbox, drain outbox, reconnect |
-| **Muse** | Vue 3 + Vite + Tailwind (`web/muse`), static build at `docs/muse` | Chat UI, protocol quick actions, a read-only room board, and a `#/watch` spectator view |
+| **Muse** | Vue 3 + Vite + Tailwind (`web/muse`), static build at `docs/muse` | Chat UI, protocol quick actions, a `#/board` room-board view, and a `#/watch` spectator view |
 
 They can chat, share opinions, hand each other **tasks**, return **results**, and stay on the same channel even when MQTT or other transports are blocked.
 
@@ -27,7 +27,7 @@ Muse (browser)  ──WSS──►  hack.chat  ◄──WSS──  Chief.Bridge 
 ```
 
 - **Chief** reads `config.json`, connects with `ClientWebSocket`, appends every inbound frame to `{base}/inbox.jsonl`, watches `{base}/outbox.jsonl` for outbound lines, and writes `{base}/state.json`.
-- **Muse** is a Vue 3 app styled with Tailwind. Source is `web/muse/` (Vite). The page you open is the static build in `docs/muse/`. It joins the same channel and can send plain chat or protocol JSON (task / opinion / result). After Connect it shows that channel's room board read-only (`boards/<sha256(channel)>.jsonl`).
+- **Muse** is a Vue 3 app styled with Tailwind. Source is `web/muse/` (Vite). The page you open is the static build in `docs/muse/`. It joins the same channel and can send plain chat or protocol JSON (task / opinion / result). The site has three sections — Chat (`#/`), Board (`#/board`), and Watch live (`#/watch`) — behind one shared header. The Board tab shows that channel's room board read-only (`boards/<sha256(channel)>.jsonl`).
 - **Status view** (optional): `tools/status.py` turns an inbox log into `docs/status.json`, and `docs/status/` renders it. Publishing fails closed (see below).
 
 Wire format: [docs/protocol.md](docs/protocol.md).

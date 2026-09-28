@@ -1,5 +1,6 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted } from "vue";
+import SiteHeader from "./SiteHeader.vue";
 import { useWatch } from "./useWatch.js";
 import { nickStyle } from "./watchFormat.js";
 
@@ -65,36 +66,8 @@ function protoBody(p) {
       <div class="absolute top-1/3 -left-40 h-[380px] w-[380px] rounded-full bg-proto/10 blur-[110px]"></div>
     </div>
 
-    <!-- header -->
-    <header class="sticky top-0 z-20 border-b border-line/70 bg-bg/80 backdrop-blur-md">
-      <div class="mx-auto flex max-w-6xl items-center justify-between gap-3 px-5 py-3">
-        <a href="./" class="group flex items-center gap-3">
-          <span class="relative flex h-2.5 w-2.5">
-            <span class="live-ping absolute inline-flex h-full w-full rounded-full bg-danger"></span>
-            <span class="relative inline-flex h-2.5 w-2.5 rounded-full bg-danger"></span>
-          </span>
-          <span class="text-[0.8rem] font-bold tracking-[0.18em] text-ink">LIVE</span>
-          <span class="hidden h-4 w-px bg-line sm:block"></span>
-          <span class="hidden text-[0.9rem] font-semibold text-muted group-hover:text-ink sm:block">muse-chief-relay</span>
-        </a>
-        <div class="flex items-center gap-2.5">
-          <span
-            class="rounded-full border px-2.5 py-1 text-[0.75rem] font-medium"
-            :class="live ? 'border-on-border text-accent-2' : 'border-line text-muted'"
-          >{{ statusText }}</span>
-          <a
-            href="./"
-            class="hidden rounded-lg border border-line bg-panel px-3 py-1.5 text-[0.8rem] font-semibold text-ink transition hover:brightness-125 sm:block"
-          >Open the client</a>
-          <a
-            :href="GITHUB_URL"
-            target="_blank"
-            rel="noopener"
-            class="rounded-lg border border-line bg-panel px-3 py-1.5 text-[0.8rem] font-semibold text-ink transition hover:brightness-125"
-          >GitHub</a>
-        </div>
-      </div>
-    </header>
+    <!-- header: shared site nav, with the watch page's LIVE identity -->
+    <SiteHeader section="watch" :status-text="statusText" :status-kind="live ? 'on' : ''" live-dot />
 
     <div v-if="!channel" class="border-b border-line/70 bg-panel-soft">
       <p class="mx-auto max-w-6xl px-5 py-2.5 text-[0.82rem] text-muted">
@@ -261,14 +234,6 @@ function protoBody(p) {
 </template>
 
 <style scoped>
-.live-ping {
-  animation: live-ping 1.6s cubic-bezier(0, 0, 0.2, 1) infinite;
-}
-@keyframes live-ping {
-  0% { transform: scale(1); opacity: 0.9; }
-  80%, 100% { transform: scale(2.6); opacity: 0; }
-}
-
 .msg-enter-active {
   transition: opacity 0.45s ease, transform 0.45s cubic-bezier(0.2, 0.7, 0.3, 1);
 }
@@ -286,7 +251,6 @@ function protoBody(p) {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .live-ping { animation: none; }
   .msg-enter-active, .pill-enter-active, .pill-leave-active { transition: none; }
   .msg-enter-from { opacity: 0; transform: none; }
 }
