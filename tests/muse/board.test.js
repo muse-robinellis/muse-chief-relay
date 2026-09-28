@@ -308,6 +308,8 @@ test("no tracked text token hashes to a board filename", () => {
     const text = buf.toString("utf8");
     while ((match = re.exec(text))) tokens.add(match[0]);
   }
+  // No exceptions. The watch view's channel is VITE_WATCH_CHANNEL at build
+  // time and is not committed.
   for (const token of tokens) {
     const dig = crypto.createHash("sha256").update(token).digest("hex");
     assert.ok(!hashes.includes(dig), "a tracked token hashes to a board filename");

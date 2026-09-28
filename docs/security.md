@@ -69,17 +69,25 @@ Limits you should know about:
 
 ## Channel names
 
-The channel name is the only thing keeping a hack.chat channel private. The Muse client has no
-default channel and doesn't remember one: you type it each time, and it isn't put in the URL,
-`localStorage`, `sessionStorage`, the console, or the page title. Keep real channel names out of
-public pages, examples, issues and screenshots, and use a placeholder like `your-channel-name`.
+The channel name is the only thing keeping a hack.chat channel private. The interactive Muse
+client has no default channel and doesn't remember one: you type it each time, and it isn't put
+in the URL, `localStorage`, `sessionStorage`, the console, or the page title. Keep private
+channel names out of public pages, examples, issues and screenshots, and use a placeholder like
+`your-channel-name`.
 
-Board filenames are the SHA-256 of the channel, so the repo and Pages don't contain the name.
-A hash of a guessable name can be brute-forced, so pick a high-entropy channel. A name already
-published (git history, old PRs, old Pages builds) stays known, and rotating the channel is the
-only fix. The Vue client hashes the channel with Web Crypto after Connect and renders the board
-as text. A missing board, a failed fetch, or a page without `crypto.subtle` leaves the chat up.
-The channel and the hash are not written to the URL, storage, logged output, or the page title.
+The read-only spectator page at `muse/#/watch` does not commit a channel name either. It reads
+`VITE_WATCH_CHANNEL` from the environment when the client is built (a GitHub Actions secret or
+variable for a Pages build). The copy committed under `docs/muse/` is built with that variable
+unset and shows "watch channel not configured". `tests/muse/board.test.js` still rejects every
+tracked token that hashes to a board filename. There is no exception.
+
+Board filenames are the SHA-256 of the channel, so the repo and Pages don't contain private
+channel names. A hash of a guessable name can be brute-forced, so pick a high-entropy channel. A
+name already published (git history, old PRs, old Pages builds) stays known, and rotating the
+channel is the only fix. The Vue client hashes the channel with Web Crypto after Connect and
+renders the board as text. A missing board, a failed fetch, or a page without `crypto.subtle`
+leaves the chat up. The channel and the hash are not written to the URL, storage, logged output,
+or the page title.
 
 ## Knowledge graph
 

@@ -35,6 +35,8 @@ __pycache__/
 # Muse frontend (Vue + Vite). The Pages build in docs/muse/ is committed.
 node_modules/
 web/muse/dist/
+web/muse/.env
+web/muse/.env.*
 
 # Rebuildable knowledge index. Markdown under knowledge/ is the source of truth.
 knowledge/.index/
