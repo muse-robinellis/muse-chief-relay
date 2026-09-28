@@ -123,13 +123,13 @@ const openTasks = computed(() => {
               <div class="mt-7 flex flex-wrap items-center gap-3">
                 <a
                   href="#/watch"
-                  class="rounded-xl bg-gradient-to-b from-btn-top to-btn-bottom px-5 py-2.5 text-[0.9rem] font-semibold text-ink shadow-[0_8px_30px_rgba(77,127,214,0.35)] transition hover:brightness-110"
+                  class="rounded-xl bg-gradient-to-b from-btn-top to-btn-bottom px-5 py-2.5 text-[0.9rem] font-semibold text-ink shadow-[0_8px_30px_rgba(77,127,214,0.35)] transition hover:brightness-110 focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
                 >Watch live →</a>
                 <a
                   :href="GITHUB_URL"
                   target="_blank"
                   rel="noopener"
-                  class="rounded-xl border border-line bg-panel px-5 py-2.5 text-[0.9rem] font-semibold text-ink transition hover:brightness-125"
+                  class="rounded-xl border border-line bg-panel px-5 py-2.5 text-[0.9rem] font-semibold text-ink transition hover:brightness-125 focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
                 >GitHub repo</a>
               </div>
               <dl class="mt-9 grid max-w-xl grid-cols-1 gap-3 sm:grid-cols-3">
@@ -207,9 +207,9 @@ const openTasks = computed(() => {
                 </p>
                 <button :class="[button, 'mt-1 w-full py-3 text-[0.95rem]']" type="submit">Connect</button>
               </form>
-              <p class="mt-4 text-[0.78rem] leading-relaxed text-dim">
+              <p class="mt-4 text-[0.78rem] leading-relaxed text-muted">
                 Uses <code class="rounded bg-panel-2 px-1 py-px font-mono text-[0.74rem]">wss://hack.chat/chat-ws</code>.
-                Prefer to just look? <a href="#/watch" class="font-semibold text-accent hover:underline">Watch live</a> instead.
+                Prefer to just look? <a href="#/watch" class="font-semibold text-accent hover:underline focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-focus">Watch live</a> instead.
               </p>
             </section>
           </div>
@@ -221,29 +221,35 @@ const openTasks = computed(() => {
             id="chat-panel"
             class="grid min-h-0 flex-1 grid-cols-1 grid-rows-[minmax(0,10rem)_minmax(0,1fr)] overflow-hidden rounded-2xl border border-line bg-panel-soft shadow-[0_20px_60px_rgba(0,0,0,0.35)] min-[821px]:grid-cols-[220px_minmax(0,1fr)] min-[821px]:grid-rows-[minmax(0,1fr)]"
           >
-            <aside class="flex min-h-0 min-w-0 flex-col gap-2.5 overflow-hidden border-b border-line bg-sidebar px-3.5 py-3.5 max-[820px]:max-h-40 min-[821px]:border-r min-[821px]:border-b-0">
+            <aside class="flex min-h-0 min-w-0 flex-col gap-2.5 overflow-hidden border-b border-line bg-sidebar px-3.5 py-3.5 min-[821px]:border-r min-[821px]:border-b-0 max-[820px]:gap-2 max-[820px]:py-2.5">
               <h2 class="m-0 shrink-0 text-xs font-semibold tracking-[0.06em] text-muted uppercase">Online</h2>
-              <ul id="users" class="m-0 min-h-0 flex-1 list-none overflow-auto p-0 text-[0.9rem]">
+              <!-- Narrow: users collapse to a single horizontal chip row so the
+                   list stays usable without growing the sidebar; Disconnect
+                   stays in normal flow below it and is never clipped. -->
+              <ul id="users" class="m-0 min-h-0 flex-1 list-none overflow-auto p-0 text-[0.9rem] max-[820px]:flex max-[820px]:flex-none max-[820px]:flex-row max-[820px]:gap-1.5 max-[820px]:overflow-x-auto max-[820px]:overflow-y-hidden max-[820px]:py-0.5">
                 <li
                   v-for="name in users"
                   :key="name"
-                  class="rounded-md px-1.5 py-1 text-chat"
+                  class="rounded-md px-1.5 py-1 text-chat max-[820px]:shrink-0 max-[820px]:rounded-full max-[820px]:border max-[820px]:border-line max-[820px]:bg-panel max-[820px]:whitespace-nowrap"
                   :class="{ 'bg-me text-accent': name === nick }"
                 >{{ name }}</li>
               </ul>
-              <div class="grid shrink-0 gap-1 text-[0.78rem] text-muted">
+              <div class="grid shrink-0 gap-1 text-[0.78rem] text-muted max-[820px]:hidden">
                 <div><span class="text-dim">channel</span> <span id="meta-channel" class="font-mono text-[0.74rem] text-ink">{{ metaChannel }}</span></div>
                 <div><span class="text-dim">you</span> <span id="meta-nick" class="font-mono text-[0.74rem] text-ink">{{ metaNick }}</span></div>
                 <div><span class="text-dim">trip</span> <span id="meta-trip" class="font-mono text-[0.74rem] text-ink">{{ metaTrip }}</span></div>
               </div>
+              <!-- Narrow: hidden here (the header Board tab is one tap away),
+                   so nothing board-related sits above the chat on phones. -->
               <a
                 href="#/board"
-                class="shrink-0 rounded-lg border border-line bg-panel px-3.5 py-2 text-center text-[0.82rem] font-medium text-muted transition hover:text-ink hover:brightness-125"
+                class="shrink-0 rounded-lg border border-line bg-panel px-3.5 py-2 text-center text-[0.82rem] font-medium text-muted transition hover:text-ink hover:brightness-125 focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus max-[820px]:hidden"
               >Room board →</a>
-              <button id="disconnect" type="button" class="shrink-0 cursor-pointer rounded-lg border border-line bg-transparent px-3.5 py-2 font-medium text-muted transition hover:text-ink" @click="disconnect">Disconnect</button>
+              <button id="disconnect" type="button" class="shrink-0 cursor-pointer rounded-lg border border-line bg-transparent px-3.5 py-2 font-medium text-muted transition hover:text-ink focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus" @click="disconnect">Disconnect</button>
             </aside>
 
             <main class="flex min-h-0 min-w-0 flex-col overflow-hidden">
+              <h1 class="sr-only">Relay chat</h1>
               <div
                 id="transcript"
                 ref="transcriptEl"
