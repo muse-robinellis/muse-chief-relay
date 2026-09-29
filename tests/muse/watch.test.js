@@ -13,6 +13,7 @@ test("watch format helpers", async () => {
   assert.equal(f.roleOf("Fuse"), "agent");
   assert.equal(f.roleOf("chief"), "agent");
   assert.equal(f.roleOf("Design"), "agent");
+  assert.equal(f.roleOf("spectator_ab12"), "spectator");
   assert.equal(f.roleOf("spectator-ab12"), "spectator");
   assert.equal(f.roleOf("stranger"), "guest");
 
@@ -27,7 +28,7 @@ test("watch format helpers", async () => {
   assert.equal(f.parseEnvelope(JSON.stringify({ cmd: "chat" })), null);
   assert.equal(f.parseEnvelope(""), null);
 
-  assert.match(f.spectatorNick(), /^spectator-[a-z0-9]{4}$/);
+  assert.match(f.spectatorNick(), /^spectator_[a-z0-9]{4}$/);
 });
 
 test("watch route wiring", async () => {
@@ -71,6 +72,7 @@ test("watch view joins the relay channel from build config as a read-only specta
   assert.match(w, /decision\.action === "joined"/);
   assert.match(w, /setStatus\(\s*"live",\s*true\s*\)/);
   assert.match(w, /decision\.action === "retry"/);
+  assert.match(w, /decision\.action === "giveup"/);
   assert.match(w, /decision\.rotateNick/);
   const v = fs.readFileSync(path.join(srcDir, "WatchLive.vue"), "utf8");
   assert.match(v, /multi-agent relay/);
@@ -91,6 +93,14 @@ test("a pre-join warn is a rejected join; live only after onlineSet", async () =
   assert.equal(taken.live, false);
   assert.equal(taken.joined, false);
   assert.equal(taken.rotateNick, true);
+
+  const format = onWatchFrame(
+    { cmd: "warn", text: "Nickname must consist of up to 24 letters, numbers, and underscores" },
+    false,
+  );
+  assert.equal(format.action, "giveup");
+  assert.equal(format.live, false);
+  assert.equal(format.rotateNick, false);
 
   const rate = onWatchFrame({ cmd: "warn", text: "You are joining channels too fast. Wait a moment." }, false);
   assert.equal(rate.action, "retry");

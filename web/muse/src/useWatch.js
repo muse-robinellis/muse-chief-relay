@@ -214,7 +214,11 @@ export function useWatch() {
         setStatus("live", true);
       }
       handleMessage(data);
-      if (decision.action === "retry") {
+      if (decision.action === "giveup") {
+        dropSocket();
+        setStatus("couldn't join — invalid nickname", false);
+        pushSys("the generated spectator nickname was rejected; not retrying");
+      } else if (decision.action === "retry") {
         if (decision.rotateNick) nick = spectatorNick();
         dropSocket();
         scheduleReconnect();

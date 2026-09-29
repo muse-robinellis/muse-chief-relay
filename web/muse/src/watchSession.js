@@ -4,7 +4,8 @@
 // on socket open leaves a nick collision or rate limit looking connected
 // with no feed. "live" is only true after onlineSet. A warn before that
 // drops the socket and retries. A taken nick rotates so the retry is not
-// the same collision.
+// the same collision. A nick-format rejection (invalid characters) stops
+// retrying entirely: no rotation can fix a nick the client generates wrong.
 
 export function onWatchFrame(frame, joined) {
   const cmd = frame && frame.cmd;
@@ -14,6 +15,12 @@ export function onWatchFrame(frame, joined) {
   }
   if (cmd === "warn" && !already) {
     const text = String((frame && frame.text) || "");
+    if (/must consist of|letters, numbers/i.test(text)) {
+      // hack.chat rejected the nick format itself (invalid characters).
+      // Rotating or retrying cannot fix that, so stop instead of looping
+      // the same rejected join forever.
+      return { joined: false, live: false, action: "giveup", rotateNick: false };
+    }
     return {
       joined: false,
       live: false,
