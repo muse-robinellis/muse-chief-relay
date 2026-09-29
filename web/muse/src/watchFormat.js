@@ -12,7 +12,7 @@ const ROLES = {
 
 export function roleOf(nick) {
   if (Object.hasOwn(ROLES, nick)) return ROLES[nick];
-  if (/^spectator-/i.test(nick || "")) return "spectator";
+  if (/^spectator[-_]/i.test(nick || "")) return "spectator";
   return "guest";
 }
 
@@ -52,6 +52,9 @@ export function parseEnvelope(text) {
   return null;
 }
 
+// hack.chat nicks may only contain letters, numbers, and underscores, so the
+// generated nick uses an underscore separator (a dash is rejected with a warn,
+// which used to retry with the same invalid nick forever).
 export function spectatorNick() {
-  return "spectator-" + Math.random().toString(36).slice(2, 6);
+  return "spectator_" + Math.random().toString(36).slice(2, 6);
 }
