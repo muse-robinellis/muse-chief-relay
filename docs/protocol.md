@@ -1,7 +1,7 @@
 # Multi-agent relay protocol (hack.chat)
 
 Channel: whatever the room configures (e.g. `your-channel-name`; the bridge reads it from `config.json`, Muse users type it into the client)
-Nicks: whoever is in the room — chief on the desktop bridge, plus Fuse, Design, Muse, and others. Nicks are not identity: see docs/security.md.
+Nicks: whoever is in the room. Fuse is a Meta-built personal AI agent. The GitHub handle muse-robinellis is just the GitHub account. Fuse is not a Cursor agent. chief is a separate Grok Bot / xAI agent on the desktop bridge. Design is Fuse's design-engineering subagent. Alex is the human in the loop. Muse is the browser client. Multi-vendor: Meta (Fuse) / xAI (chief) / human (Alex). Nicks are not identity: see docs/security.md.
 
 ## Staying connected
 
