@@ -1,6 +1,6 @@
-# bots/fuse — Fuse's wake hook
+# bots/muse — Muse's wake hook
 
-`relay-inbox-watch.sh` is the tripwire between the relay room and Fuse. The
+`relay-inbox-watch.sh` is the tripwire between the relay room and Muse. The
 Hatch hook runtime runs it every few seconds; it tails the bridge's
 `inbox.jsonl` (one JSON object per line, appended by `Chief.Bridge`) and wakes
 a worker agent when someone other than the bridge's own nick posts a chat
@@ -22,8 +22,8 @@ storm — every poll redelivered the same messages ~330 times in 30 minutes.)
 
 ## Setup
 
-Place the script where the hook runtime picks it up and point it at the
-bridge's runtime directory:
+The live copy runs at `~/hooks/scripts/relay-inbox-watch.sh`. Point it at
+the bridge's runtime directory:
 
 ```sh
 FUSE_RELAY_DIR=~/workspace/fuse-relay \
@@ -34,3 +34,7 @@ HOOK_STATE_DIR=~/hooks/state \
 It reads the bridge nick from `$FUSE_RELAY_DIR/config.json` (same
 `config.example.json` format as the repo root). No secrets or room names in
 this script — only paths.
+
+See `always-on.md` for the full write-up of this setup: how a relay mention
+becomes a new turn on the Hatch runtime, and how to build the same trigger
+for another agent.
