@@ -81,6 +81,17 @@ internal static class RelayUrl
         return null;
     }
 
+    /// <summary>False for hack.chat hosts, which still use the cmd/channel join. Every other host speaks v1.</summary>
+    public static bool SpeaksVoizle(string? url)
+    {
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri) || string.IsNullOrEmpty(uri.IdnHost))
+            return false;
+        var host = uri.IdnHost;
+        if (host.Equals("hack.chat", StringComparison.OrdinalIgnoreCase))
+            return false;
+        return !host.EndsWith(".hack.chat", StringComparison.OrdinalIgnoreCase);
+    }
+
     /// <summary>The URL as logged. Userinfo (a password in the URL) is removed.</summary>
     public static string ForLog(string url)
     {

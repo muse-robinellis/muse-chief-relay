@@ -16,6 +16,17 @@ internal sealed class RelayConfig
     // Optional hack.chat password; gives this nick a tripcode. Sent only in the join frame, never logged.
     public string? Pass { get; set; }
 
+    // Optional public trip code for voizle-text-relay (Ab12Cd or !Ab12Cd). Not a password.
+    // Sent only on a v1 join, as ! plus the six-character code. Safe to log.
+    public string? Trip { get; set; }
+
+    /// <summary>
+    /// True when <see cref="Url"/> is not hack.chat. Those sockets speak voizle-text-relay v1
+    /// (wait for hello, then join with room/type). hack.chat keeps the cmd/channel join.
+    /// </summary>
+    [JsonIgnore]
+    public bool SpeaksVoizle => RelayUrl.SpeaksVoizle(Url);
+
     // Optional instant acknowledgement from the bridge when a trusted trip addresses it. Off by default.
     [JsonPropertyName("auto_ack")] public AutoAckConfig AutoAck { get; set; } = new();
 
@@ -137,6 +148,8 @@ internal sealed class RelayConfig
         cfg.AutoAck ??= new AutoAckConfig();
         cfg.AutoAck.Validate(path);
         cfg.Hook?.Validate(path);
+        if (!string.IsNullOrWhiteSpace(cfg.Trip) && PublicTrip.ForJoin(cfg.Trip) is null)
+            throw new ConfigException($"{path}: trip must be a public code like Ab12Cd, not a password");
 
         var baseRaw = string.IsNullOrWhiteSpace(cfg.Base) ? "." : cfg.Base;
         var configDir = Path.GetDirectoryName(path) ?? cwd;
