@@ -516,8 +516,8 @@ internal sealed class HackChatBridge
 
             case "welcome" when _voizle:
                 // voizle-text-relay answers join with hello, then welcome (never onlineSet).
-                s.Confirmed = true;
-                joinResult.TrySetResult(null);
+                // Replay is history from before this session. Dispatch it while still unconfirmed so
+                // auto-ack does not answer those lines, and so a reconnect does not ack them again.
                 RememberOwnTrip(obj);
                 if (obj["replay"] is JsonArray replay)
                 {
@@ -529,6 +529,8 @@ internal sealed class HackChatBridge
                     }
                 }
 
+                s.Confirmed = true;
+                joinResult.TrySetResult(null);
                 break;
 
             case "error" when _voizle && !s.Confirmed:
@@ -580,8 +582,9 @@ internal sealed class HackChatBridge
             }
         }
 
-        if (!string.IsNullOrEmpty(trip))
-            _acker.OwnTrip = trip;
+        // A welcome with no trip (or a later reconnect that drops it) must clear a trip learned earlier.
+        // AutoAcker lives for the process, so leaving the old value would suppress that trip forever.
+        _acker.OwnTrip = string.IsNullOrEmpty(trip) ? null : trip;
     }
 
     private async Task OutboxLoopAsync(IRelaySocket ws, SemaphoreSlim sendLock, CancellationToken ct)
