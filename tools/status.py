@@ -59,11 +59,27 @@ def load_config(path: Path | None) -> dict:
     return {}
 
 
+def trip_id(value) -> str:
+    """Allowlist form: trim and drop a leading '!' the relay keeps on public trips."""
+    if not isinstance(value, str):
+        return ""
+    return value.strip().lstrip("!")
+
+
+def frame_kind(msg: dict) -> str:
+    """hack.chat says cmd. voizle-text-relay v1 says type. Either one is the command."""
+    cmd = msg.get("cmd")
+    if isinstance(cmd, str) and cmd:
+        return cmd
+    kind = msg.get("type")
+    return kind if isinstance(kind, str) else ""
+
+
 def build(inbox: Path, cfg: dict) -> dict:
     # Missing or null uses the default; an explicit [] publishes nothing.
     raw_publish = cfg.get("publish_repos")
     publish = {r.lower() for r in (DEFAULT_PUBLISH if raw_publish is None else raw_publish) if isinstance(r, str)}
-    trips = {t for t in (cfg.get("publish_trips") or []) if isinstance(t, str) and t}
+    trips = {trip_id(t) for t in (cfg.get("publish_trips") or []) if isinstance(t, str) and trip_id(t)}
 
     tasks: dict[str, dict] = {}
     # Coverage: each outbound join starts a session that runs until the last
@@ -79,15 +95,15 @@ def build(inbox: Path, cfg: dict) -> dict:
         ts = float(row.get("ts") or 0)
         msg = row.get("msg") or {}
         if ts:
-            if (row.get("dir") == "out" and isinstance(msg, dict) and msg.get("cmd") == "join") or not sessions:
+            if (row.get("dir") == "out" and isinstance(msg, dict) and frame_kind(msg) == "join") or not sessions:
                 sessions.append([ts, ts])
             else:
                 sessions[-1][1] = ts
         # Only inbound chat: the server echo is the canonical record of what was said.
-        if row.get("dir") != "in" or not isinstance(msg, dict) or msg.get("cmd") != "chat":
+        if row.get("dir") != "in" or not isinstance(msg, dict) or frame_kind(msg) != "chat":
             continue
         nick = msg.get("nick") or ""
-        trip = msg.get("trip") or ""
+        trip = trip_id(msg.get("trip") or "")
         # Every publisher needs a listed trip, the bridge included; no nick bypass.
         if trip not in trips:
             continue
