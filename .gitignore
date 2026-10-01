@@ -48,3 +48,10 @@ knowledge/.index/
 .DS_Store
 *.swp
 *~
+
+# Design room client runtime (trip, room, and logs). Never commit.
+bots/design/identity.json
+bots/design/design-bot.log
+bots/design/mentions.jsonl
+bots/design/design-outbox.jsonl
+bots/design/design-outbox.offset
