@@ -19,6 +19,20 @@ test("the Muse page is styled with Tailwind", () => {
   assert.match(app, /id="send-form"/);
 });
 
+test("the attention queue renders above the transcript in the chat view", () => {
+  const app = fs.readFileSync(appVue, "utf8");
+  assert.match(app, /<AttentionQueue/);
+  assert.match(app, /attentionItems/);
+  assert.match(app, /clearAttentionItem/);
+  assert.match(app, /id="attention-queue"|AttentionQueue\.vue/);
+  const chat = fs.readFileSync(useChat, "utf8");
+  assert.match(chat, /from\s+"\.\/attentionQueue\.js"/);
+  assert.match(chat, /clearAttentionItem/);
+  const queue = fs.readFileSync(path.join(srcDir, "AttentionQueue.vue"), "utf8");
+  assert.match(queue, /id="attention-queue"/);
+  assert.match(queue, /Needs Alex/);
+});
+
 test("the Vue client uses the shared reconnect and scroll modules", () => {
   const text = fs.readFileSync(useChat, "utf8");
   assert.match(text, /from\s+"\.\/reconnect\.js"/);
@@ -32,8 +46,11 @@ test("join fields have no name attribute", () => {
   assert.ok(start > 0 && end > start);
   const form = vue.slice(start, end);
   assert.doesNotMatch(form, /\sname\s*=/);
-  assert.doesNotMatch(form, /type="password"/);
+  // The join form intentionally has a masked password field now (join
+  // passwords, voizle#7): its id is "join-password", never "password".
   assert.doesNotMatch(form, /id="password"/);
+  assert.match(form, /id="join-password"/);
+  assert.match(form, /type="password"/);
   assert.match(form, /id="trip"/);
   assert.match(form, /type="text"/);
   assert.match(form, /Not your password/);
@@ -77,6 +94,8 @@ test("the Pages build is the Vite output, not a second copy of the old client", 
   assert.match(text, /\.min-h-0/);
   assert.match(text, /Join a channel to see its room board/);
   assert.match(text, /No board for this channel yet/);
+  assert.match(text, /attention-queue/);
+  assert.match(text, /Needs Alex/);
   const index = fs.readFileSync(path.join(published, "index.html"), "utf8");
   assert.match(index, /src="\.\/assets\//);
   assert.match(index, /href="\.\/assets\//);

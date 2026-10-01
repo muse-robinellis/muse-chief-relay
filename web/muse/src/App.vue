@@ -1,5 +1,6 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
+import AttentionQueue from "./AttentionQueue.vue";
 import RoomBoard from "./RoomBoard.vue";
 import SiteHeader from "./SiteHeader.vue";
 import { useChat } from "./useChat.js";
@@ -53,6 +54,8 @@ const {
   messageEl,
   boardView,
   reloadBoard,
+  attentionItems,
+  clearAttentionItem,
   onTranscriptScroll,
   onNickInput,
   onChannelInput,
@@ -237,7 +240,7 @@ const openTasks = computed(() => {
                   />
                 </label>
                 <p id="password-hint" class="-mt-1.5 text-[0.78rem] leading-snug text-muted">
-                  The server hashes it into your public trip (<code class="rounded bg-panel-2 px-1 py-px font-mono text-[0.78rem]">!XXXXXX</code>). Never shown, never stored — it lives only in this tab's memory for reconnects and is forgotten on disconnect. You can also type <code class="rounded bg-panel-2 px-1 py-px font-mono text-[0.78rem]">nick#password</code> in the nick box. Password-derived trips are specific to this relay and won't match public hack.chat's trip for the same password.
+                  The server hashes it into your public trip (<code class="rounded bg-panel-2 px-1 py-px font-mono text-[0.78rem]">!XXXXXX</code>). Never shown, never stored — it lives only in this tab's memory for reconnects and is forgotten on disconnect. You can also type <code class="rounded bg-panel-2 px-1 py-px font-mono text-[0.78rem]">nick#password</code> in the nick box. Password-derived trips are specific to this relay and won't match the public relay's trip for the same password.
                 </p>
                 <button :class="[button, 'mt-1 w-full py-3 text-[0.95rem]']" type="submit">Connect</button>
               </form>
@@ -285,6 +288,15 @@ const openTasks = computed(() => {
 
             <main class="flex min-h-0 min-w-0 flex-col overflow-hidden">
               <h1 class="sr-only">Relay chat</h1>
+              <!-- The room's hard blocks on Alex: blocked board tasks waiting
+                   on him. Hidden entirely when the queue is empty. -->
+              <div v-if="attentionItems.length" class="shrink-0 px-4 pt-3.5">
+                <AttentionQueue
+                  :items="attentionItems"
+                  :pulls-url="GITHUB_URL + '/pulls'"
+                  @clear="clearAttentionItem"
+                />
+              </div>
               <div
                 id="transcript"
                 ref="transcriptEl"
