@@ -70,6 +70,22 @@ class StatusTests(unittest.TestCase):
         out = self.run_build([chat(1, "Fuse", task("a", PUB)), chat(2, "Fuse", task("b", "someone/fork"))], cfg)
         self.assertEqual([t["id"] for t in out["tasks"]], ["b"])
 
+    def test_v1_type_chat_and_bang_trip_still_publish(self):
+        line = json.dumps({
+            "ts": 1,
+            "dir": "in",
+            "msg": {
+                "v": 1,
+                "type": "chat",
+                "room": "lobby",
+                "nick": "Fuse",
+                "trip": "!" + TRIP,
+                "text": task("a", PUB),
+            },
+        })
+        out = self.run_build([line], {"publish_trips": ["!" + TRIP]})
+        self.assertEqual([t["id"] for t in out["tasks"]], ["a"])
+
     def test_trip_filter(self):
         out = self.run_build([
             chat(1, "Fuse", task("a", PUB)),

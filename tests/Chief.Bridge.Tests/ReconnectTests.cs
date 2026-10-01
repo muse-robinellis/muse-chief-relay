@@ -25,8 +25,6 @@ public class ReconnectTests
     {
         const string pass = "s3cret-trip-pass";
         await using var fx = new RelayFixture(pass);
-        // Six failures, each a different way the socket can die, then a join that sticks.
-        // A cap of 3 would stop before the onlineSet.
         fx.Script.Enqueue(
             Attempt.ConnectThrows(new IOException($"dns lookup failed {pass}")),
             Attempt.ConnectThrows(new IOException("connection refused")),
@@ -83,8 +81,6 @@ public class ReconnectTests
     public async Task A_failure_to_write_the_log_or_state_does_not_exit()
     {
         await using var fx = new RelayFixture();
-        // The session catch already swallows a dead socket. These two paths used to run
-        // *after* that catch, so an IOException here killed the process on the first retry.
         Directory.CreateDirectory(Path.Combine(fx.Dir.Path, "inbox.jsonl"));
         Directory.CreateDirectory(Path.Combine(fx.Dir.Path, "state.json"));
         fx.Script.Enqueue(
@@ -105,8 +101,6 @@ public class ReconnectTests
     {
         await using var fx = new RelayFixture
         {
-            // The reconnect line is written after the session catch. A closed pipe used to
-            // throw here and leave RunForeverAsync, which Main does not catch.
             Stdout = _ => throw new IOException("stdout closed")
         };
         fx.Script.Enqueue(
@@ -153,8 +147,6 @@ public class ReconnectTests
     [Fact]
     public void Muse_pages_build_is_the_vite_client()
     {
-        // web/muse is the Vue source. docs/muse is the Vite build GitHub Pages
-        // serves. They are not byte-identical copies anymore.
         var root = RepoRoot();
         var source = Path.Combine(root, "web", "muse");
         var published = Path.Combine(root, "docs", "muse");
@@ -199,6 +191,9 @@ internal sealed class RelayFixture : IAsyncDisposable
     public SocketScript Script { get; } = new();
     public List<TimeSpan> Delays { get; } = new();
     public string? Url { get; init; }
+    public string? Trip { get; init; }
+    public bool AutoAck { get; init; }
+    public string[] MentionTrips { get; init; } = [];
     public bool UseRealSocket { get; init; }
     public TimeSpan ConnectTimeout { get; init; } = TimeSpan.FromSeconds(2);
     public TimeSpan JoinTimeout { get; init; } = TimeSpan.FromSeconds(2);
@@ -321,6 +316,17 @@ internal sealed class RelayFixture : IAsyncDisposable
             ["pass"] = _pass,
             ["base"] = "."
         };
+        if (!string.IsNullOrEmpty(Trip))
+            doc["trip"] = Trip;
+        if (AutoAck)
+        {
+            doc["auto_ack"] = new Dictionary<string, object?>
+            {
+                ["enabled"] = true,
+                ["mention_trips"] = MentionTrips,
+                ["cooldown_s"] = 10
+            };
+        }
         if (ReceiveIdleSeconds is { } idle)
             doc["receive_idle_s"] = idle;
         File.WriteAllText(path, JsonSerializer.Serialize(doc));
@@ -405,12 +411,20 @@ internal sealed class ScriptedSocket(Attempt attempt, List<string> sent) : IRela
     private readonly ConcurrentQueue<byte[]> _incoming = new(attempt.Messages.Select(m => Encoding.UTF8.GetBytes(m)));
     private readonly SemaphoreSlim _ready = new(0);
     private bool _open;
+    private int _forceClose;
 
     public bool CanCloseOutput => _open;
 
     public void Push(string json)
     {
         _incoming.Enqueue(Encoding.UTF8.GetBytes(json));
+        _ready.Release();
+    }
+
+    /// <summary>End a held socket so the bridge reconnects. Queued frames are still delivered first.</summary>
+    public void Close()
+    {
+        Interlocked.Exchange(ref _forceClose, 1);
         _ready.Release();
     }
 
@@ -441,7 +455,7 @@ internal sealed class ScriptedSocket(Attempt attempt, List<string> sent) : IRela
                 return new RelayReceiveResult(msg.Length, true, false, null, null);
             }
 
-            if (!attempt.Hold)
+            if (Volatile.Read(ref _forceClose) != 0 || !attempt.Hold)
             {
                 _open = false;
                 return RelayReceiveResult.Closed("Close", null);
@@ -549,17 +563,31 @@ internal sealed class LocalChat : IAsyncDisposable
             {
                 var accepted = await ctx.AcceptWebSocketAsync(subProtocol: null);
                 ws = accepted.WebSocket;
-                var payload = Encoding.UTF8.GetBytes(
-                    JsonSerializer.Serialize(new
-                    {
-                        cmd = "onlineSet",
-                        nicks = new[] { _nick },
-                        users = new[] { new { nick = _nick, isme = true } }
-                    }));
-                await ws.SendAsync(payload, WebSocketMessageType.Text, true, CancellationToken.None);
-                var buf = new byte[256];
+                // The bridge treats every non-hack.chat host, including this localhost stand-in, as v1.
+                var hello = Encoding.UTF8.GetBytes(
+                    JsonSerializer.Serialize(new { v = 1, type = "hello", protocol = "voizle-text-relay" }));
+                await ws.SendAsync(hello, WebSocketMessageType.Text, true, CancellationToken.None);
+                var buf = new byte[1024];
+                var welcomed = false;
                 while (ws.State == WebSocketState.Open && !_cts.IsCancellationRequested)
-                    await ws.ReceiveAsync(buf, _cts.Token);
+                {
+                    var incoming = await ws.ReceiveAsync(buf, _cts.Token);
+                    if (incoming.MessageType == WebSocketMessageType.Close)
+                        break;
+                    if (welcomed || !incoming.EndOfMessage)
+                        continue;
+                    welcomed = true;
+                    var welcome = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new
+                    {
+                        v = 1,
+                        type = "welcome",
+                        sessionId = "local",
+                        room = "throwaway-test",
+                        nick = _nick,
+                        users = new[] { new { sessionId = "local", nick = _nick } }
+                    }));
+                    await ws.SendAsync(welcome, WebSocketMessageType.Text, true, CancellationToken.None);
+                }
             }
             catch
             {

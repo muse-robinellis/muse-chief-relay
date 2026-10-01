@@ -18,6 +18,7 @@ internal sealed class HackChatBridge
     private readonly OutboxReader _outbox;
     private readonly object _fileLock = new();
     private readonly AutoAcker _acker;
+    private readonly bool _voizle;
     // Auto-acks waiting to go out. Filled by the receive loop, drained by the send loop ahead of the outbox,
     // which _sendWake wakes early so an ack doesn't wait out the outbox poll.
     private readonly ConcurrentQueue<JsonObject> _acks = new();
@@ -41,13 +42,17 @@ internal sealed class HackChatBridge
         // for the whole process, across reconnects.
         _outbox = OutboxReader.AtEnd(Path.Combine(cfg.BaseDir, "outbox.jsonl"));
         _acker = new AutoAcker(cfg.AutoAck, cfg.Nick);
+        _voizle = cfg.SpeaksVoizle;
     }
 
     private sealed class Session
     {
         public DateTimeOffset? OpenedAt;
         public volatile bool Confirmed;
+        public bool HelloAccepted;
         public string? EndReason;
+        // Null result: a v1 hello was accepted. Otherwise a rejection reason, without the "join rejected:" prefix.
+        public TaskCompletionSource<string?> Hello { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
         public TimeSpan Uptime => OpenedAt is { } t ? DateTimeOffset.UtcNow - t : TimeSpan.Zero;
     }
@@ -232,6 +237,7 @@ internal sealed class HackChatBridge
         // Acks are best effort and belong to the moment: none carries over from an earlier session.
         while (_acks.TryDequeue(out _)) { }
 
+
         await using var ws = _socketFactory(_runtime.ConnectTimeout);
         using (var connectCts = CancellationTokenSource.CreateLinkedTokenSource(ct))
         {
@@ -258,24 +264,49 @@ internal sealed class HackChatBridge
         using var sessionCts = new CancellationTokenSource();
         using var pumpCts = CancellationTokenSource.CreateLinkedTokenSource(ct, sessionCts.Token);
 
-        var join = new JsonObject { ["cmd"] = "join", ["channel"] = _cfg.Channel, ["nick"] = _cfg.Nick };
-        var wireJoin = (JsonObject)join.DeepClone();
-        if (!string.IsNullOrEmpty(_cfg.Pass))
-            wireJoin["pass"] = _cfg.Pass;
-        await SendAsync(ws, sendLock, wireJoin, ct);
-        LogEvent("out", join); // logged without the pass
-        WriteState(alive: true, connected: false, reconnecting: false);
-        Console.WriteLine($"[chief] join sent for #{_cfg.Channel} as {_cfg.Nick}; waiting for onlineSet");
-
-        // Completed with null once onlineSet arrives, or with the text of a warn that came first.
+        // Completed with null once the join is confirmed, or with the text of a rejection.
         var joinResult = new TaskCompletionSource<string?>(TaskCreationOptions.RunContinuationsAsynchronously);
-        var recvTask = ReceiveLoopAsync(ws, s, joinResult, sessionCts.Token);
         var outTask = Task.CompletedTask;
         var idleTask = Task.CompletedTask;
 
         var joinTimeout = Task.Delay(_runtime.JoinTimeout, pumpCts.Token)
             .ContinueWith(_ => { }, TaskScheduler.Default);
-        var first = await Task.WhenAny(joinResult.Task, recvTask, joinTimeout);
+
+        // hack.chat speaks second, so the join goes out before the receive loop. Doing it the
+        // other way lets onlineSet confirm the session and the following state write clear it.
+        Task<string> recvTask;
+        if (_voizle)
+        {
+            recvTask = ReceiveLoopAsync(ws, s, joinResult, sessionCts.Token);
+            Console.WriteLine("[chief] connected; waiting for voizle-text-relay hello");
+            var helloWait = await Task.WhenAny(s.Hello.Task, recvTask, joinTimeout);
+            if (helloWait == s.Hello.Task && s.Hello.Task.Result is null)
+            {
+                await SendVoizleJoinAsync(ws, sendLock, ct);
+                if (!s.Confirmed)
+                    WriteState(alive: true, connected: false, reconnecting: false);
+                Console.WriteLine($"[chief] join sent for #{_cfg.Channel} as {_cfg.Nick}; waiting for welcome");
+            }
+            else if (helloWait == s.Hello.Task)
+            {
+                s.EndReason = $"join rejected: {s.Hello.Task.Result}";
+            }
+            else if (helloWait == joinTimeout && !ct.IsCancellationRequested)
+            {
+                s.EndReason = $"join not confirmed within {_runtime.JoinTimeout.TotalSeconds:0}s";
+            }
+        }
+        else
+        {
+            await SendHackChatJoinAsync(ws, sendLock, ct);
+            WriteState(alive: true, connected: false, reconnecting: false);
+            Console.WriteLine($"[chief] join sent for #{_cfg.Channel} as {_cfg.Nick}; waiting for onlineSet");
+            recvTask = ReceiveLoopAsync(ws, s, joinResult, sessionCts.Token);
+        }
+
+        var first = s.EndReason is null
+            ? await Task.WhenAny(joinResult.Task, recvTask, joinTimeout)
+            : null;
 
         if (first == joinResult.Task && joinResult.Task.Result is null)
         {
@@ -351,6 +382,31 @@ internal sealed class HackChatBridge
         return $"{what} ended";
     }
 
+    private async Task SendHackChatJoinAsync(IRelaySocket ws, SemaphoreSlim sendLock, CancellationToken ct)
+    {
+        var join = new JsonObject { ["cmd"] = "join", ["channel"] = _cfg.Channel, ["nick"] = _cfg.Nick };
+        var wireJoin = (JsonObject)join.DeepClone();
+        if (!string.IsNullOrEmpty(_cfg.Pass))
+            wireJoin["pass"] = _cfg.Pass;
+        await SendAsync(ws, sendLock, wireJoin, ct);
+        LogEvent("out", join); // logged without the pass
+    }
+
+    private async Task SendVoizleJoinAsync(IRelaySocket ws, SemaphoreSlim sendLock, CancellationToken ct)
+    {
+        var wire = new JsonObject
+        {
+            ["v"] = 1,
+            ["type"] = "join",
+            ["room"] = _cfg.Channel,
+            ["nick"] = _cfg.Nick
+        };
+        if (PublicTrip.ForJoin(_cfg.Trip) is { } trip)
+            wire["trip"] = trip;
+        await SendAsync(ws, sendLock, wire, ct);
+        LogEvent("out", InboundFrame.ForLog(wire));
+    }
+
     private async Task<string> ReceiveLoopAsync(
         IRelaySocket ws, Session s, TaskCompletionSource<string?> joinResult, CancellationToken ct)
     {
@@ -387,6 +443,41 @@ internal sealed class HackChatBridge
     private void HandleFrame(string raw, Session s, TaskCompletionSource<string?> joinResult)
     {
         var frame = InboundFrame.Parse(raw);
+        if (_voizle && !s.HelloAccepted)
+        {
+            if (frame.Object is { } helloObj && frame.Cmd == "hello" && IsVoizleHello(helloObj))
+            {
+                s.HelloAccepted = true;
+                s.Hello.TrySetResult(null);
+            }
+            else
+            {
+                var why = frame.Cmd is "error" or "warn" && frame.Object is { } err
+                    ? Json.Str(err, "text") ?? Json.Str(err, "code") ?? frame.Cmd
+                    : $"expected voizle-text-relay hello, got {frame.Cmd ?? "a non-hello frame"}";
+                s.Hello.TrySetResult(why);
+            }
+
+            LogEvent("in", frame.LogNode);
+            return;
+        }
+
+        Dispatch(frame, s, joinResult);
+    }
+
+    private static bool IsVoizleHello(JsonObject obj)
+    {
+        if (!string.Equals(Json.Str(obj, "protocol"), "voizle-text-relay", StringComparison.Ordinal))
+            return false;
+        if (obj["v"] is not JsonValue value)
+            return false;
+        if (value.TryGetValue<int>(out var i))
+            return i == 1;
+        return value.TryGetValue<long>(out var l) && l == 1;
+    }
+
+    private void Dispatch(InboundFrame frame, Session s, TaskCompletionSource<string?> joinResult)
+    {
         // Decide on an auto-ack before the chat reaches inbox.jsonl, so the hook state it reports is the one from
         // before this very message reached the poller.
         var ack = frame is { Cmd: "chat", Object: { } chatObj } && s.Confirmed
@@ -409,7 +500,7 @@ internal sealed class HackChatBridge
 
         switch (frame.Cmd)
         {
-            case "onlineSet":
+            case "onlineSet" when !_voizle:
                 s.Confirmed = true;
                 joinResult.TrySetResult(null);
                 if (obj["users"] is JsonArray users)
@@ -421,6 +512,29 @@ internal sealed class HackChatBridge
                     }
                 }
 
+                break;
+
+            case "welcome" when _voizle:
+                // voizle-text-relay answers join with hello, then welcome (never onlineSet).
+                // Replay is history from before this session. Dispatch it while still unconfirmed so
+                // auto-ack does not answer those lines, and so a reconnect does not ack them again.
+                RememberOwnTrip(obj);
+                if (obj["replay"] is JsonArray replay)
+                {
+                    foreach (var line in replay.OfType<JsonObject>())
+                    {
+                        var replayed = InboundFrame.Parse(line.ToJsonString(JsonUtil.Opts));
+                        if (replayed.Cmd == "chat")
+                            Dispatch(replayed, s, joinResult);
+                    }
+                }
+
+                s.Confirmed = true;
+                joinResult.TrySetResult(null);
+                break;
+
+            case "error" when _voizle && !s.Confirmed:
+                joinResult.TrySetResult(Json.Str(obj, "text") ?? Json.Str(obj, "code") ?? "error");
                 break;
 
             case "warn" when !s.Confirmed:
@@ -447,6 +561,32 @@ internal sealed class HackChatBridge
         WriteState(alive: true, connected: s.Confirmed, reconnecting: false);
     }
 
+    private void RememberOwnTrip(JsonObject welcome)
+    {
+        var trip = Json.Str(welcome, "trip");
+        if (string.IsNullOrEmpty(trip) && welcome["users"] is JsonArray users)
+        {
+            var selfId = Json.Str(welcome, "sessionId");
+            var selfNick = Json.Str(welcome, "nick") ?? _cfg.Nick;
+            foreach (var u in users.OfType<JsonObject>())
+            {
+                var idMatch = !string.IsNullOrEmpty(selfId)
+                    && string.Equals(Json.Str(u, "sessionId"), selfId, StringComparison.Ordinal);
+                var nickMatch = string.Equals(Json.Str(u, "nick"), selfNick, StringComparison.Ordinal);
+                if ((idMatch || nickMatch) && Json.Str(u, "trip") is { Length: > 0 } t)
+                {
+                    trip = t;
+                    if (idMatch)
+                        break;
+                }
+            }
+        }
+
+        // A welcome with no trip (or a later reconnect that drops it) must clear a trip learned earlier.
+        // AutoAcker lives for the process, so leaving the old value would suppress that trip forever.
+        _acker.OwnTrip = string.IsNullOrEmpty(trip) ? null : trip;
+    }
+
     private async Task OutboxLoopAsync(IRelaySocket ws, SemaphoreSlim sendLock, CancellationToken ct)
     {
         while (true)
@@ -455,8 +595,9 @@ internal sealed class HackChatBridge
 
             while (_acks.TryDequeue(out var ackFrame))
             {
-                await SendAsync(ws, sendLock, ackFrame, ct);
-                LogEvent("out", ackFrame, auto: true);
+                var wire = _voizle ? VoizleWire.FromOutbox(ackFrame) : ackFrame;
+                await SendAsync(ws, sendLock, wire, ct);
+                LogEvent("out", _voizle ? InboundFrame.ForLog(wire) : ackFrame, auto: true);
             }
 
             IReadOnlyList<OutboxLine> pending;
@@ -487,8 +628,9 @@ internal sealed class HackChatBridge
                     // If this throws, the position hasn't moved past the line: the session ends and the
                     // line is sent again on the next connection (a split line may resend an already-sent
                     // part; duplicates are preferable to loss here, as before).
-                    await SendAsync(ws, sendLock, payload, ct);
-                    LogEvent("out", LogRedaction.Outbound(payload));
+                    var wire = _voizle ? VoizleWire.FromOutbox(payload) : payload;
+                    await SendAsync(ws, sendLock, wire, ct);
+                    LogEvent("out", LogRedaction.Outbound(_voizle ? InboundFrame.ForLog(wire) : payload));
                 }
 
                 _outbox.Commit(line);

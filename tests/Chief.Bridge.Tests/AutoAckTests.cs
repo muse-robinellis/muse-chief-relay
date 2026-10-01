@@ -79,6 +79,25 @@ public class AutoAckerTests
     private static readonly Func<HookView> Armed = () => View(HookState.Running);
 
     [Fact]
+    public void Bang_prefixed_inbound_trip_matches_the_stripped_allowlist()
+    {
+        var d = new AutoAcker(Cfg(), "chief").Consider("Alex", "!" + Alex, "hey chief, you there?", T0, Armed);
+        Assert.True(d.Send);
+        Assert.Equal("mention", d.Reason.Split(';')[0]);
+    }
+
+    [Fact]
+    public void Own_trip_ignores_a_leading_bang()
+    {
+        var a = new AutoAcker(Cfg(), "chief");
+        a.OwnTrip = "!" + Alex;
+        Assert.Equal(Alex, a.OwnTrip);
+        var d = a.Consider("someone", "!" + Alex, "hey chief", T0, Armed);
+        Assert.False(d.Send);
+        Assert.Equal("own trip", d.Reason);
+    }
+
+    [Fact]
     public void Trusted_human_mention_is_acked_with_the_default_text()
     {
         var a = new AutoAcker(Cfg(), "chief");

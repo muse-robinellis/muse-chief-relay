@@ -261,14 +261,18 @@ internal class InboxWatcher
 
         if (node is not JsonObject row || Json.Str(row, "dir") != "in")
             return null;
-        if (row["msg"] is not JsonObject msg || Json.Str(msg, "cmd") != "chat")
+        if (row["msg"] is not JsonObject msg)
+            return null;
+        // v1 logs a chat as type until the bridge normalizes it. Accept either shape.
+        var cmd = Json.Str(msg, "cmd") ?? Json.Str(msg, "type");
+        if (cmd != "chat")
             return null;
 
         var nick = Json.Str(msg, "nick");
         if (string.Equals(nick, ownNick, StringComparison.Ordinal))
             return null;
 
-        return new WatchedChat(nick, Json.Str(msg, "trip"), Json.Str(msg, "text"), row["ts"]?.DeepClone());
+        return new WatchedChat(nick, PublicTrip.Canonical(Json.Str(msg, "trip")), Json.Str(msg, "text"), row["ts"]?.DeepClone());
     }
 
     /// <summary>Calls <paramref name="onLine"/> for each complete line in [start, length) and returns the

@@ -67,8 +67,39 @@ internal sealed record InboundFrame(JsonNode LogNode, JsonObject? Object, string
         if (node is not JsonObject obj)
             return new InboundFrame(new JsonObject { ["raw"] = raw }, null, null);
 
+        // v1 frames say "type" and "room". Persist cmd/channel too so watch, hook, and
+        // status keep seeing a chat, and store the trip in the same form as allowlists.
+        Normalize(obj);
         var cmd = Json.Str(obj, "cmd");
         return new InboundFrame(LogRedaction.Inbound(obj, cmd), obj, cmd);
+    }
+
+    /// <summary>A log copy of an outbound v1 frame: <c>cmd</c>/<c>channel</c> filled in, trip canonical.</summary>
+    public static JsonObject ForLog(JsonObject wire)
+    {
+        var copy = (JsonObject)wire.DeepClone();
+        Normalize(copy);
+        return copy;
+    }
+
+    /// <summary>
+    /// Copy <c>type</c> into <c>cmd</c> and <c>room</c> into <c>channel</c> when those hack.chat names
+    /// are absent, and store <c>trip</c> without a leading <c>!</c>.
+    /// </summary>
+    internal static void Normalize(JsonObject obj)
+    {
+        if (Json.Str(obj, "cmd") is null && Json.Str(obj, "type") is { } type)
+            obj["cmd"] = type;
+        if (Json.Str(obj, "channel") is null && Json.Str(obj, "room") is { } room)
+            obj["channel"] = room;
+        if (Json.Str(obj, "trip") is { } trip)
+        {
+            var canonical = PublicTrip.Canonical(trip);
+            if (canonical is null)
+                obj.Remove("trip");
+            else
+                obj["trip"] = canonical;
+        }
     }
 }
 
