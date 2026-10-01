@@ -146,6 +146,7 @@ internal sealed class AutoAcker
     private readonly HashSet<string> _task;
     private readonly Queue<DateTimeOffset> _recent = new();
     private DateTimeOffset? _last;
+    private string? _ownTrip;
 
     public AutoAcker(AutoAckConfig cfg, string ownNick)
     {
@@ -155,8 +156,15 @@ internal sealed class AutoAcker
         _task = new HashSet<string>(cfg.TaskTrips, StringComparer.Ordinal);
     }
 
-    /// <summary>The bridge's own trip, learned from <c>onlineSet</c>. Messages carrying it are never acked.</summary>
-    public string? OwnTrip { get; set; }
+    /// <summary>
+    /// The bridge's own trip, learned from <c>onlineSet</c> or v1 <c>welcome</c>.
+    /// Stored without a leading <c>!</c>. Messages carrying it are never acked.
+    /// </summary>
+    public string? OwnTrip
+    {
+        get => _ownTrip;
+        set => _ownTrip = PublicTrip.Canonical(value);
+    }
 
     public AckDecision Consider(string? nick, string? trip, string? text, DateTimeOffset now, Func<HookView> hook)
     {
@@ -164,13 +172,14 @@ internal sealed class AutoAcker
             return new AckDecision(false, "disabled");
         if (string.IsNullOrEmpty(nick) || string.Equals(nick, _ownNick, StringComparison.OrdinalIgnoreCase))
             return new AckDecision(false, "own nick");
-        if (string.IsNullOrEmpty(trip))
+        var tripId = PublicTrip.Canonical(trip);
+        if (tripId is null)
             return new AckDecision(false, "untripped");
-        if (OwnTrip is not null && trip == OwnTrip)
+        if (_ownTrip is not null && tripId == _ownTrip)
             return new AckDecision(false, "own trip");
 
-        var mentionOk = _mention.Contains(trip);
-        if (!mentionOk && !_task.Contains(trip))
+        var mentionOk = _mention.Contains(tripId);
+        if (!mentionOk && !_task.Contains(tripId))
             return new AckDecision(false, "untrusted trip");
 
         var trigger = Addressing.Detect(text, _ownNick);
