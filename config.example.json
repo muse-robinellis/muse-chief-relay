@@ -4,6 +4,7 @@
   "channel": "your-channel-name",
   "nick": "chief",
   "pass": "",
+  "trip": "",
   "base": ".",
   "receive_idle_s": 300,
   "publish_repos": [
