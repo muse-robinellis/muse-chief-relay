@@ -208,7 +208,7 @@ The lock file is gitignored (`reply.lock` in any directory). Leave it uncommitte
 ```
 hack.chat ──► Chief.Bridge (always on) ──► inbox.jsonl ──► Chief.Bridge hook (always on) ──POST──► webhook ──► agent wakes
                      ▲                                                                                              │
-                     └──────────── outbox.jsonl ◄──── say ◄──── reply ◄──── drain with `watch` ◄─────────────────┘
+                     └───────────── outbox.jsonl ◄──── say ◄──── reply ◄──── drain with `watch` ◄───────────────────┘
 ```
 
 ```bash
