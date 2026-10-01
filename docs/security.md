@@ -28,33 +28,43 @@ claim any nick.
 - If a pass leaks, pick a new one. The trip changes with it, so update every `publish_trips` and
   trusted-trip list that named the old trip.
 
-## Muse web client: public trip
+## Muse web client: identity (public trip or password)
 
 The browser speaks voizle-text-relay v1. After `hello`, join is
-`{"v":1,"type":"join","room":…,"nick":…}` plus an optional `trip`. That `trip` is only the
-public code, sent as `!` plus six letters or digits (for example `!Ab12Cd`). The relay does
-not hash a secret. The client never sends a password, and never sends `nick#password`.
+`{"v":1,"type":"join","room":…,"nick":…}` plus either an optional `trip`
+(public code) or an optional `password`. Since voizle#7 the relay hashes a
+join password server-side (SHA-256 with the server's salt) into a public
+trip; the client never hashes, and never sends a password anywhere except
+the join frame's `password` field.
 
-Type the code only, like `Ab12Cd` (!XXXX without the !). Do not type the password that used
-to produce that code on hack.chat.
+Two ways to claim an identity — pick one. If both are given, the password
+wins and the public trip is omitted.
+
+**Public trip.** Type the code only, like `Ab12Cd` (!XXXX without the !).
 
 - The field is `type="text"` with `id="trip"`. It is not a password box, so a password
   manager should not fill it. It has no `name` attribute. It is cleared as soon as you press
   Connect.
 - Only a six-character public code is accepted (`A–Z`, `a–z`, `0–9`, `+`, `/`). A leading `!`
   is stripped and then put back on the wire, so `Ab12Cd` and `!Ab12Cd` both send `!Ab12Cd`.
-  A password, a longer secret, or `nick#password` is not stored and not sent. The transcript
-  says the trip was not sent and does not quote what you typed.
-- A `name#secret` typed into the Nick box is split so only the name remains. The secret is
-  discarded. It is not copied into the trip field.
-- An accepted public trip is kept in one JavaScript variable inside the chat module's closure.
-  It is not a Vue `ref` and not a property of `window`, so an automatic rejoin sends the same
-  trip. Disconnect, a first join that is rejected for good, or closing/reloading the tab
-  forgets it. A drop after a successful join does not.
-- The client never logs the field (no `console.*` calls) and never writes it to
-  `localStorage`, `sessionStorage`, cookies, or the URL.
-- Unrecognised frames are shown with any `token`, `pass`, or `password` field replaced by
-  `<redacted>`.
+  Anything else is not sent as a trip, and the transcript says so without quoting what you typed.
+
+**Password.** The server derives your public trip (`!XXXXXX`) from it.
+
+- The field is `type="password"` with `id="join-password"`. It has no `name` attribute. It is
+  cleared as soon as you press Connect.
+- A `name#password` typed into the Nick box works too: the part after `#` is captured as the
+  join password (the visible box keeps only the name). It is never displayed.
+- The password is never rendered, never logged (unrecognised frames are shown with any
+  `token`, `pass`, or `password` field replaced by `<redacted>`), and never written to
+  `localStorage`, `sessionStorage`, cookies, or the URL. It lives only in one JavaScript
+  variable inside the chat module's closure — not a Vue `ref`, not a property of `window` —
+  so an automatic rejoin keeps the same identity. Disconnect, a first join that is rejected
+  for good, or closing/reloading the tab forgets it. The client never logs the field
+  (no `console.*` calls).
+- Password-derived trips are specific to this relay's salt: they will not match public
+  hack.chat's trip for the same password, and changing the server's salt later rotates
+  every derived trip.
 
 Limits you should know about:
 

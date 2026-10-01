@@ -23,8 +23,9 @@ function redact(key, value) {
   return SECRET_KEYS.has(key) ? "<redacted>" : value;
 }
 
-// A legacy "name#password" nick is split so the secret is never displayed
-// and never sent. This relay does not hash a password into a trip.
+// A legacy "name#password" nick is split so the secret is never displayed.
+// The secret is sent as the join password (the server hashes it into a
+// public trip); it is never copied into the trip field and never rendered.
 function splitNick(raw) {
   const s = String(raw || "");
   const i = s.indexOf("#");
@@ -86,8 +87,12 @@ export function useChat() {
   const channelEl = ref(null);
   const nickEl = ref(null);
   const tripEl = ref(null);
+  const passwordEl = ref(null);
   const transcriptEl = ref(null);
   const messageEl = ref(null);
+  // Set when a "name#password" nick is typed: the secret was captured as the
+  // join password (never shown). Cleared once consumed by connect().
+  const nickPasswordHint = ref("");
 
   let room;
   const boardView = ref(null);
@@ -113,11 +118,21 @@ export function useChat() {
   let ws = null;
   let myChannel = "";
   // The public trip code (!XXXX), only after publicTrip() accepts it. A
-  // password is never stored here and never sent. An automatic rejoin sends
-  // the same public trip. The field is cleared as soon as Connect is
-  // pressed. Disconnect, a first join that is rejected for good, or closing
-  // the tab forgets it. A drop after a successful join keeps it.
+  // password is never stored here and never sent as a trip. An automatic
+  // rejoin sends the same public trip. The field is cleared as soon as
+  // Connect is pressed. Disconnect, a first join that is rejected for good,
+  // or closing the tab forgets it. A drop after a successful join keeps it.
   let myPublicTrip = "";
+  // The join password, if one was given (password field or name#password).
+  // Sent verbatim in the join frame; the server hashes it into a public
+  // trip. Never rendered, never logged, never written to any storage — it
+  // lives only in this tab's memory so an automatic rejoin keeps the same
+  // identity, exactly like myPublicTrip. Disconnect, a first join that is
+  // rejected for good, or closing the tab forgets it.
+  let myPassword = "";
+  // Secret captured from a "name#password" nick while typing. Consumed by
+  // connect(); never rendered.
+  let nickFieldSecret = "";
   let tripOmitted = false;
   let myTrip = "";
   let online = new Set();
@@ -149,6 +164,13 @@ export function useChat() {
     myPublicTrip = "";
     tripOmitted = false;
     if (tripEl.value) tripEl.value.value = "";
+  }
+
+  function forgetPassword() {
+    myPassword = "";
+    nickFieldSecret = "";
+    nickPasswordHint.value = "";
+    if (passwordEl.value) passwordEl.value.value = "";
   }
 
   function syncUsers() {
@@ -336,15 +358,17 @@ export function useChat() {
         online = new Set();
         syncUsers();
         awaitingJoin = true;
-        sendRaw(joinFrame({ room: myChannel, nick: nick.value, trip: myPublicTrip }));
+        sendRaw(joinFrame({ room: myChannel, nick: nick.value, trip: myPublicTrip, password: myPassword }));
         appendRow({
           text: `${hasJoinedOnce ? "rejoining" : "joining"} #${myChannel} as ${nick.value}` +
-            (myPublicTrip ? " (with a public trip)" : ""),
+            (myPassword
+              ? " (with a password — the server derives your trip, it is never shown)"
+              : myPublicTrip ? " (with a public trip)" : ""),
           kind: "sys",
         });
         if (tripOmitted && !hasJoinedOnce) {
           appendRow({
-            text: "trip not sent — enter the public trip code only (like Ab12Cd), not a password",
+            text: "trip not sent — use a public trip code (like Ab12Cd) or the password field",
             kind: "sys",
           });
         }
@@ -377,6 +401,7 @@ export function useChat() {
           wantConnected = false;
           dropSocket();
           forgetTrip();
+          forgetPassword();
           setStatus("join rejected", "err");
         }
       }
@@ -400,13 +425,19 @@ export function useChat() {
     };
   }
 
-  function connect(channel, rawNick, tripRaw) {
+  function connect(channel, rawNick, tripRaw, passwordRaw) {
     const { name, secret } = splitNick(rawNick);
     myChannel = channel;
     nick.value = name || DEFAULT_NICK;
     const typed = String(tripRaw || "");
     myPublicTrip = publicTrip(typed);
-    tripOmitted = !!secret || (typed.trim() !== "" && !myPublicTrip);
+    // Explicit password field wins; a name#password secret is the fallback.
+    // Either way it is sent as the join password (hashed server-side), never
+    // as a trip and never displayed.
+    myPassword = String(passwordRaw || "") || nickFieldSecret || secret;
+    nickFieldSecret = "";
+    nickPasswordHint.value = "";
+    tripOmitted = !myPassword && typed.trim() !== "" && !myPublicTrip;
     metaChannel.value = myChannel;
     metaNick.value = nick.value;
     myTrip = "";
@@ -435,14 +466,21 @@ export function useChat() {
     const v = ev.target.value;
     const i = v.indexOf("#");
     if (i < 0) {
+      nickFieldSecret = "";
+      nickPasswordHint.value = "";
       nick.value = v;
       return;
     }
-    // Drop the secret. Do not copy it into the trip field: that field is
-    // sent as a public id, and this relay does not hash passwords.
+    // Keep the secret out of the visible field: stash it as the join
+    // password (sent in the join frame, hashed server-side, never shown)
+    // instead of silently dropping it.
     const name = v.slice(0, i);
+    nickFieldSecret = v.slice(i + 1);
     ev.target.value = name;
     nick.value = name;
+    nickPasswordHint.value = nickFieldSecret
+      ? "Password captured from the nick — it will be sent (never shown) and the server will derive your trip from it."
+      : "";
   }
 
   function onChannelInput(ev) {
@@ -468,8 +506,10 @@ export function useChat() {
     channelError.value = false;
     const typed = tripEl.value ? tripEl.value.value : "";
     if (tripEl.value) tripEl.value.value = "";
+    const pwRaw = passwordEl.value ? passwordEl.value.value : "";
+    if (passwordEl.value) passwordEl.value.value = "";
     const rawNick = nickEl.value ? nickEl.value.value : nick.value;
-    connect(nextChannel, rawNick, typed);
+    connect(nextChannel, rawNick, typed, pwRaw);
   }
 
   function disconnect() {
@@ -477,6 +517,7 @@ export function useChat() {
     clearRetry();
     dropSocket();
     forgetTrip();
+    forgetPassword();
     inChat.value = false;
     setStatus("disconnected", "off");
     showBoardPlaceholder();
@@ -579,6 +620,8 @@ export function useChat() {
     channelEl,
     nickEl,
     tripEl,
+    passwordEl,
+    nickPasswordHint,
     transcriptEl,
     messageEl,
     relayUrl: RELAY_URL,
