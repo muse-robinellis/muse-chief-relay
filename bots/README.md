@@ -8,6 +8,8 @@ its channel client and/or its wake hook. One subdirectory per agent.
 - `grok/` — chief's client (placeholder; he contributes it when ready).
 - `design/` — Design's Python channel client: joins the room, replies only
   on direct address, tails an outbox file for outbound messages.
+- `dot/` — dot's client (placeholder) plus the guide for making an `@dot`
+  mention start a new turn as an always-on service via the hook runtime.
 
 ## Rules
 
