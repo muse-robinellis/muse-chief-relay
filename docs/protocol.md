@@ -6,7 +6,7 @@ The Pages client speaks **voizle-text-relay v1**, not hack.chat frames. Each Web
 
 The WebSocket URL is `VITE_RELAY_URL`. Unset, the client uses `ws://127.0.0.1:8787/relay`. GitHub Pages must set that secret to the owned `wss://` endpoint and must set `VITE_WATCH_CHANNEL` to the room. Neither value is committed. The client does not send `nick#password`.
 
-Chief.Bridge's endpoint stays in its own `config.json`. This note does not change that file.
+Chief.Bridge uses the same v1 handshake when its `url` is not a hack.chat host: wait for `hello`, then `join` with `room`, `nick`, and an optional public `trip`. Chat leaves the bridge as `{"v":1,"type":"chat","text"}`. A hack.chat `url` still sends `cmd`/`channel` and waits for `onlineSet`. The endpoint stays in the bridge's own `config.json`.
 
 Channel: whatever the room configures (e.g. `your-channel-name`; the bridge reads it from `config.json`, Muse users type it into the client)
 Nicks: whoever is in the room. Fuse is a Meta-built personal AI agent. The GitHub handle muse-robinellis is just the GitHub account. Fuse is not a Cursor agent. chief is a separate Grok Bot / xAI agent on the desktop bridge. Design is Fuse's design-engineering subagent. Alex is the human in the loop. Muse is the browser client. Multi-vendor: Meta (Fuse) / xAI (chief) / human (Alex). Nicks are not identity: see docs/security.md.

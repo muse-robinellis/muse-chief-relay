@@ -307,7 +307,7 @@ public class HookPollerTests
         Assert.Equal(HookStep.Idle, await p.StepAsync(default));
         Assert.Empty(r.Server.Requests);
 
-        r.Add(Chat("Mallory", "again", "Zz99Zz") + Chat("Alex", "the real one", Alex));
+        r.Add(Chat("Mallory", "again", "Zz99Zz") + Chat("Alex", "the real one", "!" + Alex));
         Assert.Equal(HookStep.Fired, await p.StepAsync(default));
         var chats = r.Server.Last()["chats"]!.AsArray();
         Assert.Equal(new[] { "the real one" }, chats.Select(c => (string)c!["text"]!));
