@@ -56,7 +56,11 @@ const {
   reloadBoard,
   attentionItems,
   clearAttentionItem,
-  onTranscriptScroll,
+  unreadCount,
+  firstUnreadId,
+  mentionNick,
+  jumpToLatest,
+  onComposerKeydown,  onTranscriptScroll,
   onNickInput,
   onChannelInput,
   onMessageInput,
@@ -304,22 +308,43 @@ const openTasks = computed(() => {
                 aria-live="polite"
                 @scroll="onTranscriptScroll"
               >
-                <div
-                  v-for="row in messages"
-                  :key="row.id"
-                  class="grid gap-0.5 rounded-lg px-2 py-1.5 transition-colors hover:bg-row-hover"
-                  :class="{ 'border border-proto-border bg-proto-bg': row.kind === 'proto' }"
-                >
-                  <div class="flex items-baseline gap-2 text-[0.75rem] text-muted">
-                    <span v-if="row.nick" class="font-semibold" :class="row.me ? 'text-accent-2' : 'text-accent'">{{ row.nick }}</span>
-                    <span class="font-mono text-[0.7rem] text-time">{{ row.time }}</span>
-                  </div>
-                  <div v-if="row.tag" class="mb-1 inline-block w-fit rounded-full border border-proto-tag px-[0.45rem] py-px text-[0.68rem] tracking-wider text-proto uppercase">{{ row.tag }}</div>
+                <template v-for="row in messages" :key="row.id">
+                  <!-- First row that arrived while the reader was scrolled up. -->
                   <div
-                    class="whitespace-pre-wrap break-words leading-snug"
-                    :class="row.kind === 'sys' ? 'text-[0.85rem] text-sys' : row.kind === 'proto' ? 'font-mono text-[0.8rem] text-proto' : 'text-chat'"
-                  >{{ row.text }}</div>
-                </div>
+                    v-if="row.id === firstUnreadId && unreadCount > 0"
+                    class="flex items-center gap-2 px-2 text-[0.72rem] font-semibold tracking-[0.08em] text-accent uppercase"
+                    aria-hidden="true"
+                  ><span class="h-px flex-1 bg-line"></span>New messages<span class="h-px flex-1 bg-line"></span></div>
+                  <div
+                    class="grid gap-0.5 rounded-lg px-2 py-1.5 transition-colors hover:bg-row-hover"
+                    :class="{ 'border border-proto-border bg-proto-bg': row.kind === 'proto' }"
+                  >
+                    <div class="flex items-baseline gap-2 text-[0.75rem] text-muted">
+                      <button
+                        v-if="row.nick"
+                        type="button"
+                        class="cursor-pointer font-semibold hover:underline focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-focus"
+                        :class="row.me ? 'text-accent-2' : 'text-accent'"
+                        :title="'Mention ' + row.nick"
+                        @click="mentionNick(row.nick)"
+                      >{{ row.nick }}</button>
+                      <span class="font-mono text-[0.7rem] text-time">{{ row.time }}</span>
+                    </div>
+                    <div v-if="row.tag" class="mb-1 inline-block w-fit rounded-full border border-proto-tag px-[0.45rem] py-px text-[0.68rem] tracking-wider text-proto uppercase">{{ row.tag }}</div>
+                    <div
+                      class="whitespace-pre-wrap break-words leading-snug"
+                      :class="row.kind === 'sys' ? 'text-[0.85rem] text-sys' : row.kind === 'proto' ? 'font-mono text-[0.8rem] text-proto' : 'text-chat'"
+                    >{{ row.text }}</div>
+                  </div>
+                </template>
+                <!-- Unread affordance: sticky to the bottom of the scrollport,
+                     jumps back to the tail on tap (same pattern as #/watch). -->
+                <button
+                  v-if="unreadCount > 0"
+                  type="button"
+                  class="sticky bottom-3 z-10 ml-auto flex w-fit items-center gap-1.5 rounded-full border border-line bg-panel px-3 py-1.5 text-[0.8rem] font-medium text-ink shadow-[0_8px_24px_rgba(0,0,0,0.35)] transition hover:brightness-125 focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
+                  @click="jumpToLatest"
+                ><span aria-hidden="true">↓</span>{{ unreadCount }} new</button>
               </div>
 
               <details class="max-h-[42%] min-h-0 shrink overflow-auto border-t border-line bg-actions px-4 pt-2 pb-3.5">
@@ -368,6 +393,7 @@ const openTasks = computed(() => {
                   placeholder="Say something…"
                   autocomplete="off"
                   @input="onMessageInput"
+                  @keydown="onComposerKeydown"
                 />
                 <button :class="[button, 'shrink-0']" type="submit">Send</button>
               </form>
