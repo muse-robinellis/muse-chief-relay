@@ -46,6 +46,8 @@ const {
   channelEl,
   nickEl,
   tripEl,
+  passwordEl,
+  nickPasswordHint,
   relayUrl,
   transcriptEl,
   messageEl,
@@ -198,6 +200,9 @@ const openTasks = computed(() => {
                     @input="onNickInput"
                   />
                 </label>
+                <p v-if="nickPasswordHint" class="-mt-1.5 text-[0.78rem] leading-snug text-accent-2">
+                  {{ nickPasswordHint }}
+                </p>
                 <!-- No name attribute: nothing in this form can land in a query string. -->
                 <label class="grid gap-1.5 text-[0.85rem] text-muted">
                   Public trip (optional)
@@ -215,7 +220,24 @@ const openTasks = computed(() => {
                   />
                 </label>
                 <p id="trip-hint" class="-mt-1.5 text-[0.78rem] leading-snug text-muted">
-                  The public trip code only, like <code class="rounded bg-panel-2 px-1 py-px font-mono text-[0.78rem]">Ab12Cd</code> (!XXXX without the !). Not your password. This page does not hash a password. Anything else is not sent.
+                  The public trip code only, like <code class="rounded bg-panel-2 px-1 py-px font-mono text-[0.78rem]">Ab12Cd</code> (!XXXX without the !). Not your password — use the password field below if you join with one. Anything else is not sent as a trip.
+                </p>
+                <label class="grid gap-1.5 text-[0.85rem] text-muted">
+                  Password (optional)
+                  <input
+                    id="join-password"
+                    ref="passwordEl"
+                    :class="field"
+                    type="password"
+                    autocomplete="new-password"
+                    autocapitalize="off"
+                    autocorrect="off"
+                    spellcheck="false"
+                    aria-describedby="password-hint"
+                  />
+                </label>
+                <p id="password-hint" class="-mt-1.5 text-[0.78rem] leading-snug text-muted">
+                  The server hashes it into your public trip (<code class="rounded bg-panel-2 px-1 py-px font-mono text-[0.78rem]">!XXXXXX</code>). Never shown, never stored — it lives only in this tab's memory for reconnects and is forgotten on disconnect. You can also type <code class="rounded bg-panel-2 px-1 py-px font-mono text-[0.78rem]">nick#password</code> in the nick box. Password-derived trips are specific to this relay and won't match public hack.chat's trip for the same password.
                 </p>
                 <button :class="[button, 'mt-1 w-full py-3 text-[0.95rem]']" type="submit">Connect</button>
               </form>
