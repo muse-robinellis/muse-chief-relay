@@ -192,6 +192,8 @@ internal sealed class RelayFixture : IAsyncDisposable
     public List<TimeSpan> Delays { get; } = new();
     public string? Url { get; init; }
     public string? Trip { get; init; }
+    public bool AutoAck { get; init; }
+    public string[] MentionTrips { get; init; } = [];
     public bool UseRealSocket { get; init; }
     public TimeSpan ConnectTimeout { get; init; } = TimeSpan.FromSeconds(2);
     public TimeSpan JoinTimeout { get; init; } = TimeSpan.FromSeconds(2);
@@ -316,6 +318,15 @@ internal sealed class RelayFixture : IAsyncDisposable
         };
         if (!string.IsNullOrEmpty(Trip))
             doc["trip"] = Trip;
+        if (AutoAck)
+        {
+            doc["auto_ack"] = new Dictionary<string, object?>
+            {
+                ["enabled"] = true,
+                ["mention_trips"] = MentionTrips,
+                ["cooldown_s"] = 10
+            };
+        }
         if (ReceiveIdleSeconds is { } idle)
             doc["receive_idle_s"] = idle;
         File.WriteAllText(path, JsonSerializer.Serialize(doc));
@@ -400,12 +411,20 @@ internal sealed class ScriptedSocket(Attempt attempt, List<string> sent) : IRela
     private readonly ConcurrentQueue<byte[]> _incoming = new(attempt.Messages.Select(m => Encoding.UTF8.GetBytes(m)));
     private readonly SemaphoreSlim _ready = new(0);
     private bool _open;
+    private int _forceClose;
 
     public bool CanCloseOutput => _open;
 
     public void Push(string json)
     {
         _incoming.Enqueue(Encoding.UTF8.GetBytes(json));
+        _ready.Release();
+    }
+
+    /// <summary>End a held socket so the bridge reconnects. Queued frames are still delivered first.</summary>
+    public void Close()
+    {
+        Interlocked.Exchange(ref _forceClose, 1);
         _ready.Release();
     }
 
@@ -436,7 +455,7 @@ internal sealed class ScriptedSocket(Attempt attempt, List<string> sent) : IRela
                 return new RelayReceiveResult(msg.Length, true, false, null, null);
             }
 
-            if (!attempt.Hold)
+            if (Volatile.Read(ref _forceClose) != 0 || !attempt.Hold)
             {
                 _open = false;
                 return RelayReceiveResult.Closed("Close", null);
