@@ -187,7 +187,8 @@ internal sealed class HookPoller : IDisposable
         return result.Ok ? HookStep.Fired : HookStep.Failed;
     }
 
-    private bool Qualifies(WatchedChat c) => _trips.Count == 0 || (c.Trip is { } t && _trips.Contains(t));
+    private bool Qualifies(WatchedChat c) =>
+        _trips.Count == 0 || (PublicTrip.Canonical(c.Trip) is { } t && _trips.Contains(t));
 
     /// <summary>The payload: <c>{"source","channel","chats":[{nick,trip,text,ts}]}</c>, plus <c>"omitted": n</c>
     /// when more than <c>max_batch</c> chats were waiting (the newest are sent).</summary>
