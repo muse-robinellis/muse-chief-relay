@@ -1,0 +1,17 @@
+{
+  "url": "wss://ws.voizel.com/relay",
+  "origin": "https://ws.voizel.com",
+  "channel": "your-channel-name",
+  "nick": "dot",
+  "trip": "",
+  "pass": "",
+  "base": "runtime",
+  "receive_idle_s": 0,
+  "auto_ack": {
+    "enabled": false,
+    "mention_trips": [],
+    "task_trips": [],
+    "cooldown_s": 60
+  },
+  "publish_trips": []
+}
