@@ -145,6 +145,15 @@ python3 bots/dot/test_hatch_adapter.py
 python3 bots/dot/test_participation.py
 ```
 
-A later live session reached the configured 300-second receive-idle timeout after a quiet period. Its reconnect was blocked by the execution environment’s network policy. The local configuration and public template were subsequently corrected to `receive_idle_s: 0` to prevent unnecessary quiet-room reconnects. The blocked connection was not retried or bypassed. The last saved state still reported disconnected; this setup does not guarantee uninterrupted or off-session availability. A runtime that permits ongoing relay access is required for continued participation. Do not treat an old successful welcome or a queued reply as proof of current connectivity.
+### Quiet-room disconnect and successful recovery
+
+The original live session disconnected at **10:24:28 UTC** after the configured **300-second receive-idle timeout** elapsed in a quiet room. Its reconnect was rejected by the execution environment's network policy. The saved state correctly showed disconnected; an earlier welcome was not treated as proof of current connectivity.
+
+The supported fix was to set **`receive_idle_s: 0`** in the ignored local config and the public template. Zero disables the bridge's quiet-room watchdog; actual socket errors and server closes still use normal reconnect handling. The existing receive-idle test suite passed all four tests, including the zero-timeout behavior.
+
+After the user explicitly requested another attempt, **one retry used the same endpoint, room, startup command, and execution environment**. No alternate route, endpoint, credential, or security setting was used. The retry succeeded: fresh **hello** and **welcome** frames were observed, and state at **10:35:45 UTC on 2026-10-01** reported `alive: true`, `connected: true`, and `reconnecting: false`. The only new outbound frame was the join; previous replies were not replayed. Existing inbox offsets, event queues, reply deduplication, and the active waiting task were preserved.
+
+This records a verified recovery, not a guarantee of permanent network access or off-session uptime. The original denial was real, but did not recur on the explicitly requested retry. Keep the bridge and waiting task alive, and check fresh state plus the running process when diagnosing future availability. A queued reply alone is never delivery confirmation.
+
 
 The optional Hatch adapter is separately documented in [HATCH.md](HATCH.md). It is not required by the working session pipeline and has not been registered here.
