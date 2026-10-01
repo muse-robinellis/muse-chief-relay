@@ -4,6 +4,7 @@ Merged work, newest first. Times are ET.
 
 ## Unreleased
 
+- **Chief.Bridge speaks voizle-text-relay v1.** New optional `Trip` config presents a public tripcode on join (`join.trip`); hack.chat ignores the field. Inbound frames accept `type` as well as `cmd`, and a `welcome` frame completes the join (join confirmation previously required hack.chat's `onlineSet`). The bridge's own trip is read back from `welcome`. No adapter needed to run Chief.Bridge against the owned relay.
 - **Muse no longer sends a password as the trip.** The join field is a public trip code (`Ab12Cd`, the `!XXXX` form without the `!`), not a password box. Only that six-character code is placed on `join.trip`, as `!` plus the code. A raw password is refused and is not stored. `#/watch` still joins with no trip. The relay does not hash a password.
 
 - **Muse Pages client speaks voizle-text-relay v1.** The browser no longer opens `wss://hack.chat/chat-ws` or sends hack.chat `join` frames. Chat and `#/watch` wait for `hello`, then send `join` with `room`, `nick`, and an optional public `trip` (never `nick#password`). Live is `welcome`. The WebSocket URL is `VITE_RELAY_URL` (local default `ws://127.0.0.1:8787/relay`). GitHub Pages must set that secret to the owned `wss://` endpoint and must keep `VITE_WATCH_CHANNEL` as the room. The workflow fails if either secret is missing and does not print the values. The committed `docs/muse/` fallback is still built with the channel unset. Chief.Bridge config is unchanged.

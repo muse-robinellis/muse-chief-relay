@@ -262,12 +262,15 @@ internal sealed class HackChatBridge
         var wireJoin = (JsonObject)join.DeepClone();
         if (!string.IsNullOrEmpty(_cfg.Pass))
             wireJoin["pass"] = _cfg.Pass;
+        if (!string.IsNullOrEmpty(_cfg.Trip))
+            wireJoin["trip"] = _cfg.Trip; // voizle-text-relay: present the public trip; hack.chat ignores it
         await SendAsync(ws, sendLock, wireJoin, ct);
         LogEvent("out", join); // logged without the pass
         WriteState(alive: true, connected: false, reconnecting: false);
-        Console.WriteLine($"[chief] join sent for #{_cfg.Channel} as {_cfg.Nick}; waiting for onlineSet");
+        Console.WriteLine($"[chief] join sent for #{_cfg.Channel} as {_cfg.Nick}; waiting for onlineSet/welcome");
 
-        // Completed with null once onlineSet arrives, or with the text of a warn that came first.
+        // Completed with null once onlineSet (hack.chat) or welcome (voizle-text-relay)
+        // arrives, or with the text of a warn that came first.
         var joinResult = new TaskCompletionSource<string?>(TaskCreationOptions.RunContinuationsAsynchronously);
         var recvTask = ReceiveLoopAsync(ws, s, joinResult, sessionCts.Token);
         var outTask = Task.CompletedTask;
@@ -420,6 +423,31 @@ internal sealed class HackChatBridge
                             _acker.OwnTrip = Json.Str(u, "trip") is { Length: > 0 } t ? t : null;
                     }
                 }
+
+                break;
+
+            case "welcome":
+                // voizle-text-relay answers join with hello → welcome (never onlineSet).
+                // The welcome echoes our session's trip at top level and lists the room's users.
+                s.Confirmed = true;
+                joinResult.TrySetResult(null);
+                var wTrip = Json.Str(obj, "trip");
+                if (string.IsNullOrEmpty(wTrip) && obj["users"] is JsonArray wUsers)
+                {
+                    var selfId = Json.Str(obj, "sessionId");
+                    foreach (var u in wUsers.OfType<JsonObject>())
+                    {
+                        if (!string.IsNullOrEmpty(selfId)
+                            && string.Equals(Json.Str(u, "sessionId"), selfId, StringComparison.Ordinal)
+                            && Json.Str(u, "trip") is { Length: > 0 } t)
+                        {
+                            wTrip = t;
+                            break;
+                        }
+                    }
+                }
+                if (wTrip is { Length: > 0 })
+                    _acker.OwnTrip = wTrip;
 
                 break;
 

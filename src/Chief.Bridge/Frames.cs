@@ -67,7 +67,7 @@ internal sealed record InboundFrame(JsonNode LogNode, JsonObject? Object, string
         if (node is not JsonObject obj)
             return new InboundFrame(new JsonObject { ["raw"] = raw }, null, null);
 
-        var cmd = Json.Str(obj, "cmd");
+        var cmd = Json.Str(obj, "cmd") ?? Json.Str(obj, "type");
         return new InboundFrame(LogRedaction.Inbound(obj, cmd), obj, cmd);
     }
 }

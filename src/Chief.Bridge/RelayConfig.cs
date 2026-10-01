@@ -16,6 +16,10 @@ internal sealed class RelayConfig
     // Optional hack.chat password; gives this nick a tripcode. Sent only in the join frame, never logged.
     public string? Pass { get; set; }
 
+    // Optional public tripcode to present on join (voizle-text-relay style relays take the
+    // trip as presented instead of deriving it from Pass). Public value; safe to log.
+    public string? Trip { get; set; }
+
     // Optional instant acknowledgement from the bridge when a trusted trip addresses it. Off by default.
     [JsonPropertyName("auto_ack")] public AutoAckConfig AutoAck { get; set; } = new();
 
